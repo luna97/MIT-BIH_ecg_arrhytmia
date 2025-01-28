@@ -1,0 +1,6 @@
+torch
+torchvision
+wdbf
+scikit-learn
+neurokit2
+tqdm

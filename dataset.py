@@ -2,14 +2,17 @@ import os
 import torch
 
 class ECGDataset(torch.utils.data.Dataset):
-    def __init__(self, data_folder, subset='train'):
+    def __init__(self, data_folder, subset='train', transform=None, classes=['N', 'S', 'V', 'F', 'Q'], num_leads=2):
         self.data_folder = data_folder
         self.subset = subset
         self.samples = []
+        self.transform = transform
+        self.num_leads = num_leads
         with open(os.path.join(data_folder, subset, 'labels.csv'), 'r') as f:
             for line in f:
                 sample, label = line.strip().split(',')
-                self.samples.append((sample, label))
+                if label in classes:
+                    self.samples.append((sample, label))
 
     def __len__(self):
         return len(self.samples)
@@ -24,7 +27,16 @@ class ECGDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         sample, label = self.samples[idx]
         signal = torch.load(os.path.join(self.data_folder, self.subset, f'{sample}.pt'), weights_only=True)
+       
+        if self.transform: # Check if transform is provided and apply it
+            signal = self.transform(signal)
+
+        signal = signal[..., :self.num_leads]
+            
         return signal, self.get_label_int(label)
+    
+    def get_labels(self):
+        return [self.get_label_int(label) for _, label in self.samples]
     
 
 def collate_fn(batch):

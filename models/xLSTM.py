@@ -52,13 +52,14 @@ class myxLSTM(nn.Module):
         embedding_dim = x.shape[-1]
         print(f"Embedding Dim: {x.shape}")
 
-        self.xlstm = get_xlstm(embedding_dim, xlstm_depth=xlstm_depth)
-        self.fc = nn.Linear(embedding_dim, num_classes)
-        #self.fc = nn.Sequential(
-        #    nn.Linear(embedding_dim, embedding_dim // 2),
-        #    nn.ReLU(),
-        #    nn.Linear(embedding_dim // 2, num_classes),
-        #)
+        self.xlstm = get_xlstm(embedding_dim, xlstm_depth=xlstm_depth, dropout=dropout)
+
+        #self.fc = nn.Linear(embedding_dim, num_classes)
+        self.fc = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim // 2),
+            self.activation,
+            nn.Linear(embedding_dim // 2, num_classes),
+        )
 
     def convolve(self, x):
         x = x.permute(0, 2, 1) # move channels to the last dimension
@@ -88,40 +89,25 @@ class myxLSTM(nn.Module):
 
         x = x.permute(0, 2, 1)
         return x
+    
 
-
-    def forward(self, x, lengths):
+    def get_embeddings(self, x):
         x = self.convolve(x)
-        # print(x.shape)
         x = self.xlstm(x)
+        return x[:, -1, :]
 
-        #lengths = self.get_new_lengths(lengths)
-        #print('lenghts:', lengths)
-        #print('x shape', x.shape)
 
-        # Take the element of x at lengths index for each sample in the batch
-        # x = x[torch.arange(x.size(0)), lengths - 1]
-        #print('x shape', x.shape)
-        x = x[:, -1, :]
+    def forward(self, x, lengths=None):
+        x = self.get_embeddings(x)
         x = self.fc(x)
-
         return x
-    
-    def get_new_lengths(self, lengths):
-        new_lengths = (lengths + 2 * self.conv1d1a.padding[0] - self.conv1d1a.dilation[0] * (self.conv1d1a.kernel_size[0] - 1) - 1) // self.conv1d1a.stride[0] + 1
-        new_lengths = (new_lengths + 2 * self.maxpool.padding - (self.maxpool.kernel_size - 1) - 1) // self.maxpool.stride + 1
-        new_lengths = (new_lengths + 2 * self.conv1d2.padding[0] - (self.conv1d2.kernel_size[0] - 1) - 1) // self.conv1d2.stride[0] + 1
-        new_lengths = (new_lengths + 2 * self.maxpool.padding - (self.maxpool.kernel_size - 1) - 1) // self.maxpool.stride + 1
-        new_lengths = (new_lengths + 2 * self.conv1d3.padding[0] - (self.conv1d3.kernel_size[0] - 1) - 1) // self.conv1d3.stride[0] + 1
-        new_lengths = (new_lengths + 2 * self.maxpool.padding - (self.maxpool.kernel_size - 1) - 1) // self.maxpool.stride + 1
-        return new_lengths
 
-    
+
     def trainable_parameters(self):
         return self.parameters()
 
 
-def get_xlstm(embedding_dim, xlstm_depth=1):
+def get_xlstm(embedding_dim, xlstm_depth=1, dropout=0.2):
     cfg = xLSTMBlockStackConfig(
         mlstm_block=mLSTMBlockConfig(
             mlstm=mLSTMLayerConfig(
@@ -141,8 +127,9 @@ def get_xlstm(embedding_dim, xlstm_depth=1):
         ),
         num_blocks=xlstm_depth,
         embedding_dim=embedding_dim,
-        dropout=0.2,
-        slstm_at=range(0, xlstm_depth),
+        dropout=dropout,
+        context_length=700,
+        slstm_at=range(0, xlstm_depth, 2),
     )
 
     return xLSTMBlockStack(cfg)

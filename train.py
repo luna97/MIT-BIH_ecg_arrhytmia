@@ -15,23 +15,28 @@ import argparse
 import random
 import wandb
 import os 
-from utils import *
+from utils.utils import *
+from utils.train_utils import *
+from utils.loss_utils import *
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
 
 from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
-from utils import calculate_metrics, print_metrics_table
+from utils.utils import calculate_metrics, print_metrics_table
 
 # Argument parser for hyperparameters
 parser = argparse.ArgumentParser(description='Train ECG model')
 parser.add_argument('--input_size', type=int, default=2, help='Input size')
 parser.add_argument('--hidden_size', type=int, default=128, help='Hidden size')
 parser.add_argument('--num_layers', type=int, default=3, help='Number of layers')
-parser.add_argument('--lr', type=float, default=0.003, help='Learning rate')
+parser.add_argument('--lr', type=float, default=0.0003, help='Learning rate for training')
+parser.add_argument('--lr_pretrain', type=float, default=0.0003, help='Learning rate for pretraining')
 parser.add_argument('--wd', type=float, default=0.00001, help='Weight decay')
 parser.add_argument('--dropout', type=float, default=0.3, help='Dropout rate')
-parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
+parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+parser.add_argument('--epochs_pretrain', type=int, default=50, help='Number of epochs for pretraining')
 parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
 parser.add_argument('--augment_data', action='store_true', help='Augment data')
 parser.add_argument('--model', type=str, default='xLSTM', help='Model to use')
@@ -43,12 +48,16 @@ parser.add_argument('--run_name', type=str, default=None, help='Run name')
 parser.add_argument('--use_scheduler', action='store_true', help='Use scheduler')
 parser.add_argument('--pooling', type=str, default='avg', help='Pooling method')
 parser.add_argument('--act_fn', type=str, default='leakyrelu', help='Activation function')
-parser.add_argument('--classes', nargs='*', type=str, default=['N', 'S', 'V', 'F', 'Q'], help='Classes')
+parser.add_argument('--classes', nargs='*', type=str, default=['N', 'S', 'V'], help='Classes')
 parser.add_argument('--num_leads', type=int, default=2, help='Number of leads')
-parser.add_argument('--include_validation', action='store_true', help='Include validation set', default=False)
+parser.add_argument('--include_val', action='store_true', help='Include validation set', default=False)
 parser.add_argument('--label_smoothing', type=float, default=.0, help='Label smoothing')
 parser.add_argument('--pretrain', action='store_true', help='Pretrain model')
+parser.add_argument('--sparse_loss', action='store_true', help='Use sparse loss')
+parser.add_argument('--cluster_loss', action='store_true', help='Use cluster loss')
+parser.add_argument('--separate_pretrain', action='store_true', help='Separate pretrain')
 args = parser.parse_args()
+
 
 # setup deterministic seeds
 if args.deterministic:
@@ -85,14 +94,7 @@ weights = get_training_class_weights(train_dataset, num_classes).to(device)
 
 model = get_model(args)
 
-if args.pretrain:
-    optimizer = optim.AdamW(model.fc.parameters(), lr=args.lr, weight_decay=args.wd)  # Use appropriate optimizer
-    # optimizer with all but not fc
-    optimizer_encoder = optim.AdamW([
-        param for name, param in model.named_parameters() if 'fc' not in name
-    ], lr=args.lr, weight_decay=args.wd)  # Use appropriate optimizer
-else: 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
+optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
 criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=args.label_smoothing)  # Use appropriate loss for multi-class classification
 
@@ -112,6 +114,35 @@ if args.log:
 # 3. Training Loop
 model.to(device)
 
+
+# Pretrain the model
+if args.pretrain:
+    best_val_loss = float('inf')
+    best_model_state = None
+    optimizer_encoder = optim.SGD([
+        param for name, param in model.named_parameters() if 'fc' not in name
+    ], lr=args.lr, momentum=0.9, weight_decay=args.wd)  # Use appropriate optimizer
+
+    for epoch in range(args.epochs_pretrain):
+        pretrain_loss = pretrain_loop(model, optimizer_encoder, train_loader, device, args, epoch, weights)
+
+        if args.skip_validation: continue
+
+        pretrain_loss_val = eval_pretrain_loop(model, val_loader, device, weights, args)
+
+        if args.log: wandb.log({
+            "pretrain_loss": pretrain_loss,
+            "pretrain_val_loss": pretrain_loss_val
+        })
+        # keep track of the best model based on validation loss
+        if pretrain_loss_val < best_val_loss:
+            best_val_loss = pretrain_loss_val
+            best_model_state = model.state_dict()
+
+    # Load the best model state if pretrained
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+            
 best_f1, best_model_state = 0.0, None
 
 for epoch in range(args.epochs):
@@ -119,107 +150,31 @@ for epoch in range(args.epochs):
     loop = tqdm(enumerate(train_loader), total=len(train_loader), leave=False)
     train_loss, f1_train = 0, 0
     all_targets_train, all_predictions_train = [], []
-    if args.pretrain:
-        pretrain_loss = 0
 
-    for batch_idx, (data, target, lengths, patient_ids) in loop:
-        data = data.to(device).float()
-        target = target.to(device)
-
-        if args.pretrain:
-            optimizer_encoder.zero_grad()
-            embeddings = model.get_embeddings(data)
-            p_loss = contrastive_coupled_loss(embeddings, target, patient_ids, weights)
-            p_loss.backward()
-            #print(loss.item())
-            optimizer_encoder.step()
-            pretrain_loss += p_loss.item()
-
-        # Zero out gradients
-        optimizer.zero_grad()
-
-        # Forward pass
-        outputs = model(data, lengths)
-        loss = criterion(outputs, target)
-
-        # Backward and optimize
-        loss.backward()
-        optimizer.step()
-
-        train_loss += loss.item()
-
-        _, predicted = torch.max(outputs, 1)
-
-        all_targets_train.extend(target.cpu().numpy())
-        all_predictions_train.extend(predicted.cpu().numpy())
-
-        loop.set_description(f"Epoch [{epoch+1}/{args.epochs}]")
-        if args.pretrain:
-            loop.set_postfix(loss=loss.item(), pretrain_loss=p_loss.item())
-        else:
-            loop.set_postfix(loss=loss.item())
-
-    # calculate metrics
-    train_loss /= len(train_loader)
-    pretrain_loss /= len(train_loader)
-    accuracy_train = accuracy_score(all_targets_train, all_predictions_train)
-    f1_train = f1_score(all_targets_train, all_predictions_train, average='macro', zero_division=0)
-    train_sensitivity, train_ppv, train_specificity = calculate_metrics(all_targets_train, all_predictions_train, num_classes)
-
-    if args.pretrain:
-        print(f"Epoch [{epoch+1}/{args.epochs}] Training Loss: {train_loss:.4f}, Pretrain Loss: {pretrain_loss:.4f}, Accuracy: {accuracy_train:.4f}, F1 Score: {f1_train:.4f}")
-    else:
-        print(f"Epoch [{epoch+1}/{args.epochs}] Training Loss: {train_loss:.4f}, Accuracy: {accuracy_train:.4f}, F1 Score: {f1_train:.4f}")
+    acc_train, f1_train, train_loss = train_loop(model, optimizer, criterion, train_loader, device, args, epoch)
 
     if args.use_scheduler: scheduler.step()
     
     if args.skip_validation: continue
 
-    # Validation loop (add validation metrics calculation here)
-    model.eval()
-    val_loss = 0
-    all_targets, all_predictions = [], []
-    with torch.no_grad():
-        val_loop = tqdm(val_loader, total=len(val_loader), leave=False)
-        for data, target, lengths, patient_ids in val_loop:
-            data = data.to(device).float()
-            target = target.to(device)
-
-            outputs = model(data, lengths)
-            loss = criterion(outputs, target)
-            val_loss += loss.item()
-
-            _, predicted = torch.max(outputs, 1)
-
-            all_targets.extend(target.cpu().numpy())
-            all_predictions.extend(predicted.cpu().numpy())
-
-    # calculate metrics
-    val_loss /= len(val_loader)
-    accuracy = accuracy_score(all_targets, all_predictions)
-    f1 = f1_score(all_targets, all_predictions, average='macro', zero_division=0)
-    val_sensitivity, val_ppv, val_specificity = calculate_metrics(all_targets, all_predictions, num_classes)
-
-    print(f"Validation Loss: {val_loss:.4f}, Accuracy: {accuracy:.4f}, F1 Score: {f1:.4f}")
+    # evaluation loop
+    val_loss, val_accuracy, val_f1, _, _, _ = eval_loop(model, criterion, val_loader, device, num_classes)
+    print(f"Val Loss: {val_loss:.4f}, Accuracy: {val_accuracy:.4f}, F1 Score: {val_f1:.4f}")
 
     # Save the best model based on validation F1 score
-    if f1 > best_f1:
-        best_f1 = f1
+    if val_f1 > best_f1:
+        best_f1 = val_f1
         best_model_state = model.state_dict()
 
     # Log epoch metrics to wandb
-    if args.log: 
-        log = {
-            "train_loss": train_loss,
-            "train_accuracy": accuracy_train,
-            "train_f1": f1_train,
-            "val_loss": val_loss,
-            "val_accuracy": accuracy,
-            "val_f1": f1,
-        }
-        if args.pretrain:
-            log["pretrain_loss"] = pretrain_loss
-        wandb.log(log)
+    if args.log: wandb.log({
+        "train_loss": train_loss,
+        "train_accuracy": acc_train,
+        "train_f1": f1_train,
+        "val_loss": val_loss,
+        "val_accuracy": val_accuracy,
+        "val_f1": val_f1,
+    })
 
 # Load the best model state
 if best_model_state is not None:
@@ -227,29 +182,8 @@ if best_model_state is not None:
 
 print("Finished Training")
 
-# Evaluation on the Test Set (after training)
-model.eval()
-with torch.no_grad():
-    test_loss = 0
-    all_targets, all_predictions = [], []
-    for data, target, lengths, patient_ids in tqdm(test_loader):
-        data = data.to(device).float()
-        target = target.to(device)
-
-        outputs = model(data, lengths)
-        loss = criterion(outputs, target)
-        test_loss += loss.item()
-
-        _, predicted = torch.max(outputs, 1)
-
-        all_targets.extend(target.cpu().numpy())
-        all_predictions.extend(predicted.cpu().numpy())
-
-# calculate metrics
-test_loss /= len(test_loader)
-test_accuracy = accuracy_score(all_targets, all_predictions)
-test_f1 = f1_score(all_targets, all_predictions, average='macro', zero_division=0)
-test_sensitivity, test_ppv, test_specificity = calculate_metrics(all_targets, all_predictions, num_classes)
+# testing on the test set
+test_loss, test_accuracy, test_f1, test_sensitivity, test_ppv, test_specificity = eval_loop(model, criterion, test_loader, device, num_classes)
 
 # print test metrics
 print(f"Test Loss: {test_loss:.4f}, Accuracy: {test_accuracy:.4f}, F1 Score: {test_f1:.4f}")

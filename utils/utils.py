@@ -9,6 +9,9 @@ from collections import Counter
 from models.xLSTM import myxLSTM
 from models.simple_LSTM import ECG_LSTM, ECG_CONV1D_LSTM
 import torch.nn.functional as F
+from sklearn.metrics import accuracy_score, f1_score
+from tqdm import tqdm
+
 
 def calculate_metrics(y_true, y_pred, num_classes):
     """Calculates per-class sensitivity, PPV, and specificity."""
@@ -83,7 +86,7 @@ def get_datasets(args, train_transform):
   test_dataset = ECGDataset(f'data/preprocessed_{args.dataset}', subset='test', transform=None, classes=args.classes, num_leads=args.num_leads)
 
   print(f"Test Dataset len: {len(test_dataset)}")
-  if args.include_validation:
+  if args.include_val:
       print('Mixing val and train DS1 datasets')
       # get one dataset from train and val
       train_val_dataset = torch.utils.data.ConcatDataset([train_dataset, val_dataset])
@@ -129,40 +132,3 @@ def get_model(args):
   else:
       raise ValueError("Model not supported")
   return model
-
-
-def contrastive_coupled_loss(outputs, labels, patient_ids, class_weights, margin=.1):
-    outputs = F.normalize(outputs, p=2, dim=1) # Normalize embeddings
-    # outer product on the outputs to get cosine similarity
-    similarity_matrix = torch.mm(outputs, outputs.t()) - torch.eye(outputs.size(0)).to(outputs.device)
-    # create a matrix where the same patient has a 0 and different patients have a 1
-    patient_matrix = (patient_ids.unsqueeze(0) != patient_ids.unsqueeze(1)).float().to(outputs.device) 
-
-    # set to zero values between same patients
-    similarity_matrix = similarity_matrix * patient_matrix
-
-    # get the matrix for same label (1) and different label (0)
-    label_matrix = (labels.unsqueeze(0) == labels.unsqueeze(1)).float().to(outputs.device)
-    # apply class weights in both dimensions
-    weight_matrix = class_weights[labels].unsqueeze(1) * class_weights[labels].unsqueeze(0)
-
-    positive_loss = torch.clamp(margin - similarity_matrix, min=0) * label_matrix * weight_matrix # Positive pairs: maximize similarity
-    negative_loss = torch.clamp(similarity_matrix + margin, min=0) * (1 - label_matrix)  # Negative pairs: minimize similarity
-
-    # maximize the similarity between same label and minimize the similarity between different labels
-    loss = (positive_loss + negative_loss).sum(dim=1).mean()
-    return loss
-
-def contrastive_cluster_loss(outputs, patient_ids):
-    # outer product on the outputs to get cosine similarity
-    similarity_matrix = torch.mm(outputs, outputs.t()) - torch.eye(outputs.size(0)).to(outputs.device)
-    # create a matrix where the same patient has a 0 and different patients have a 1
-    patient_matrix = (patient_ids.unsqueeze(0) == patient_ids.unsqueeze(1)).float()
-    # set to zero values between same patients
-    similarity_matrix = similarity_matrix * patient_matrix
-
-    similarity_matrix = similarity_matrix.abs()
-    loss = -similarity_matrix.sum(dim=1).mean()
-    return loss
-
-   

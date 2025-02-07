@@ -64,7 +64,7 @@ def train_step(model, optimizer, criterion, data, target):
     loss.backward()
     optimizer.step()
     _, predicted = torch.max(outputs, 1)
-    return loss.item(), outputs, predicted
+    return loss.item(), predicted
 
 def eval_step(model, criterion, data, target):
     """
@@ -126,14 +126,14 @@ def eval_loop(model, criterion, dataloader, device, num_classes):
         loss /= len(dataloader)
         accuracy = accuracy_score(all_targets, all_predictions)
         f1 = f1_score(all_targets, all_predictions, average='macro', zero_division=0)
-        sensitivity, ppv, specificity = calculate_metrics(all_targets, all_predictions, num_classes)
+        acc_avg, acc, sensitivity, specificity, ppv = calculate_metrics(all_targets, all_predictions, num_classes)
 
         return loss, accuracy, f1, sensitivity, ppv, specificity
 
 def train_loop(model, optimizer, criterion, train_loader, device, args, epoch):
     model.train()
     loop = tqdm(enumerate(train_loader), total=len(train_loader), leave=False)
-    train_loss, f1_train = 0, 0
+    train_loss = 0
     all_targets_train, all_predictions_train = [], []
     
     for _, (data, target, _, _) in loop:
@@ -141,7 +141,7 @@ def train_loop(model, optimizer, criterion, train_loader, device, args, epoch):
         target = target.to(device)
 
 
-        t_loss, outputs, predicted = train_step(model, optimizer, criterion, data, target)
+        t_loss, predicted = train_step(model, optimizer, criterion, data, target)
         train_loss += t_loss
 
         all_targets_train.extend(target.cpu().numpy())
@@ -159,10 +159,17 @@ def train_loop(model, optimizer, criterion, train_loader, device, args, epoch):
     print(f"Epoch [{epoch+1}/{args.epochs}] Training Loss: {train_loss:.4f}, Accuracy: {accuracy_train:.4f}, F1 Score: {f1_train:.4f}")
     return accuracy_train, f1_train, train_loss
 
-def pretrain_loop(model, optimizer, train_loader, device, args, epoch, weights):
+def pretrain_loop(model, optimizer, criterion, train_loader, device, args, epoch, weights):
+    """
+    Training loop for the pretraining phase. If separate_pretrain is set to True, only the pretraining loss is calculated.
+    Otherwise, the training step is done here where one step is made with the contrastive loss and one step with the classification loss.
+    """
     model.train()
     loop = tqdm(enumerate(train_loader), total=len(train_loader), leave=False)
     pretrain_loss = 0
+    if not args.separate_pretrain:
+        train_loss, f1_train = 0, 0
+        all_targets_train, all_predictions_train = [], []
 
     for _, (data, target, _, patient_ids) in loop:
         data = data.to(device).float()
@@ -170,12 +177,39 @@ def pretrain_loop(model, optimizer, train_loader, device, args, epoch, weights):
 
         p_loss = pretrain_step(model, optimizer, data, target, patient_ids, weights, args)
         pretrain_loss += p_loss
-        loop.set_description(f"Epoch [{epoch+1}/{args.epochs_pretrain}]")
-        loop.set_postfix(pretrain_loss=p_loss)
+
+        if not args.separate_pretrain:
+            t_loss, predicted = train_step(model, optimizer, criterion, data, target)
+            train_loss += t_loss
+
+            all_targets_train.extend(target.cpu().numpy())
+            all_predictions_train.extend(predicted.cpu().numpy())
+
+            loop.set_description(f"Epoch [{epoch+1}/{args.epochs_pretrain}]")
+            loop.set_postfix(loss=t_loss, pretrain_loss=p_loss)
+        else:
+            loop.set_description(f"Epoch [{epoch+1}/{args.epochs_pretrain}]")
+            loop.set_postfix(pretrain_loss=p_loss)
 
     pretrain_loss /= len(train_loader)
-    print(f"Epoch [{epoch+1}/{args.epochs_pretrain}] Pretrain Loss: {pretrain_loss:.4f}")
-    return pretrain_loss
+
+    if not args.separate_pretrain:
+        train_loss /= len(train_loader)
+        accuracy_train = accuracy_score(all_targets_train, all_predictions_train)
+        f1_train = f1_score(all_targets_train, all_predictions_train, average='macro', zero_division=0)
+
+        print(f"Epoch [{epoch+1}/{args.epochs}] Training Loss: {train_loss:.4f}, Pretrain Loss: {pretrain_loss:.4f} Accuracy: {accuracy_train:.4f}, F1 Score: {f1_train:.4f}")
+        return {
+            "accuracy_train": accuracy_train,
+            "f1_train": f1_train,
+            "train_loss": train_loss,
+            "pretrain_loss": pretrain_loss
+        }
+    else:
+        print(f"Epoch [{epoch+1}/{args.epochs_pretrain}] Pretrain Loss: {pretrain_loss:.4f}")
+        return {
+            "pretrain_loss": pretrain_loss
+        }
 
 def eval_pretrain_loop(model, dataloader, device, weights, args):
     model.eval()

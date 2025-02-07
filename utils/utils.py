@@ -8,6 +8,7 @@ from dataset import ECGDataset
 from collections import Counter
 from models.xLSTM import myxLSTM
 from models.simple_LSTM import ECG_LSTM, ECG_CONV1D_LSTM
+from models.seq2seq import Seq2SeqModel
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score
 from tqdm import tqdm
@@ -18,30 +19,33 @@ def calculate_metrics(y_true, y_pred, num_classes):
 
     cm = confusion_matrix(y_true, y_pred, labels=range(num_classes))  #Important to specify labels
 
-    sensitivity = []
-    ppv = []
-    specificity = []
+    # https://stackoverflow.com/questions/31324218/scikit-learn-how-to-obtain-true-positive-true-negative-false-positive-and-fal
+    # Sensitivity, hit rate, recall, or true positive rate
+    FP = cm.sum(axis=0) - np.diag(cm)
+    FN = cm.sum(axis=1) - np.diag(cm)
+    TP = np.diag(cm)
+    TN = cm.sum() - (FP + FN + TP)
+    TPR = TP / (TP + FN)
+    # Specificity or true negative rate
+    TNR = TN / (TN + FP)
+    # Precision or positive predictive value
+    PPV = TP / (TP + FP)
+    # Negative predictive value
+    NPV = TN / (TN + FN)
+    # Fall out or false positive rate
+    FPR = FP / (FP + TN)
+    # False negative rate
+    FNR = FN / (TP + FN)
+    # False discovery rate
+    FDR = FP / (TP + FP)
 
+    # Overall accuracy
+    ACC = (TP + TN) / (TP + FP + FN + TN)
+    # ACC_micro = (sum(TP) + sum(TN)) / (sum(TP) + sum(FP) + sum(FN) + sum(TN))
+    ACC_macro = np.mean(
+        ACC)  # to get a sense of effectiveness of our method on the small classes we computed this average (macro-average)
 
-    for i in range(num_classes):
-      TP = cm[i, i]
-      FP = sum(cm[:, i]) - TP
-      FN = sum(cm[i, :]) - TP
-      TN = sum(sum(cm)) - TP - FP - FN
-
-
-      # Handle potential division by zero
-      sensitivity_i = TP / (TP + FN) if (TP+FN) !=0 else 0.0
-      ppv_i = TP / (TP + FP) if (TP + FP) != 0 else 0.0
-      specificity_i = TN / (TN + FP) if (TN + FP) !=0 else 0.0
-
-      sensitivity.append(sensitivity_i)
-      ppv.append(ppv_i)
-      specificity.append(specificity_i)
-
-
-    return sensitivity, ppv, specificity
-
+    return ACC_macro, ACC, TPR, TNR, PPV
 
 def print_metrics_table(sensitivity, ppv, specificity, class_names = [ "N", "S", "V", "F", "Q"] ):
   """Prints a formatted table of per-class metrics."""
@@ -75,15 +79,15 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def get_datasets(args, train_transform):
+def get_datasets(args, train_transform, data_dir):
   """
   Returns the train, val, and test datasets.
   """
   
   # create the datasets
-  train_dataset = ECGDataset(f'data/preprocessed_{args.dataset}', subset='train', transform=train_transform, classes=args.classes, num_leads=args.num_leads)
-  val_dataset = ECGDataset(f'data/preprocessed_{args.dataset}', subset='val', transform=train_transform, classes=args.classes, num_leads=args.num_leads)
-  test_dataset = ECGDataset(f'data/preprocessed_{args.dataset}', subset='test', transform=None, classes=args.classes, num_leads=args.num_leads)
+  train_dataset = ECGDataset(f'{data_dir}/preprocessed_{args.dataset}', subset='train', transform=train_transform, classes=args.classes, num_leads=args.num_leads)
+  val_dataset = ECGDataset(f'{data_dir}/preprocessed_{args.dataset}', subset='val', transform=train_transform, classes=args.classes, num_leads=args.num_leads)
+  test_dataset = ECGDataset(f'{data_dir}/preprocessed_{args.dataset}', subset='test', transform=None, classes=args.classes, num_leads=args.num_leads)
 
   print(f"Test Dataset len: {len(test_dataset)}")
   if args.include_val:
@@ -123,12 +127,14 @@ def get_training_class_weights(train_dataset, num_classes):
    
 
 def get_model(args):
-  if args.model == 'xLSTM':
-      model = myxLSTM(args.num_leads, num_classes=len(args.classes), dropout=args.dropout, xlstm_depth=args.num_layers, activation_fn=args.act_fn, pooling=args.pooling, num_leads=args.num_leads)
-  elif args.model == 'LSTM':
-      model = ECG_LSTM(args.input_size, args.hidden_size, args.num_layers, len(args.classes), args.dropout)
-  elif args.model == 'CONV1D_LSTM':
-      model = ECG_CONV1D_LSTM(args.input_size, args.hidden_size, args.num_layers, len(args.classes), args.dropout)
-  else:
-      raise ValueError("Model not supported")
-  return model
+    if args.model == 'xLSTM':
+        model = myxLSTM(args.num_leads, num_classes=len(args.classes), dropout=args.dropout, xlstm_depth=args.num_layers, activation_fn=args.act_fn, pooling=args.pooling, num_leads=args.num_leads, channels=[32, 64, 128])
+    elif args.model == 'LSTM':
+        model = ECG_LSTM(args.input_size, args.hidden_size, args.num_layers, len(args.classes), args.dropout)
+    elif args.model == 'CONV1D_LSTM':
+        model = ECG_CONV1D_LSTM(args.input_size, args.hidden_size, args.num_layers, len(args.classes), args.dropout)
+    elif args.model == 'seq2seq':
+        model = Seq2SeqModel(args.input_size, args.hidden_size, args.num_layers, len(args.classes), args.dropout)
+    else:
+        raise ValueError("Model not supported")
+    return model

@@ -1,6 +1,8 @@
 import os
 import torch
 
+valid_annotations = ['N', 'L', 'R', 'e', 'j', 'A', 'a', 'J', 'S', 'V', 'E', 'F', '/', 'f', 'Q']
+
 class ECGDataset(torch.utils.data.Dataset):
     def __init__(self, data_folder, subset='train', transform=None, classes=['N', 'S', 'V', 'F', 'Q'], num_leads=2):
         self.data_folder = data_folder
@@ -26,6 +28,7 @@ class ECGDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         sample, label = self.samples[idx]
+
         # needed for contrastive learning
         patient_id = sample.split('_')[0]
         signal = torch.load(os.path.join(self.data_folder, self.subset, f'{sample}.pt'), weights_only=True)
@@ -43,7 +46,7 @@ class ECGDataset(torch.utils.data.Dataset):
 
 def collate_fn(batch):
     signals, labels, patients_ids = zip(*batch)
-    # from tuple to list
+    # from tuple to list    sample, label, orig_label = line.strip().split(',')
     patients_ids = torch.tensor([int(p) for p in list(patients_ids)])
     lengths = torch.tensor([len(sig) for sig in signals])  # Calculate lengths
     signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True, padding_value=0) #Explicitly set padding to 0

@@ -37,15 +37,23 @@ def contrastive_coupled_loss(outputs, labels, patient_ids, class_weights, margin
     # create a matrix where the same patient has a 0 and different patients have a 1
     patient_matrix = (patient_ids.unsqueeze(0) != patient_ids.unsqueeze(1)).float().to(outputs.device) 
 
+    # orig_label_matrix = (orig_labels.unsqueeze(0) == orig_labels.unsqueeze(1)).float().to(outputs.device)
+    # matrix where is 1 only if the orig label is 0
+    # similarity_matrix = similarity_matrix + orig_label_matrix
+
+    # matrix where the patient is 7 --> synthetic data is taken from different patients so we want to make their embeddings similar
+    # synt_pat_matrix = ((patient_ids == 7).unsqueeze(0) * (patient_ids == 7).unsqueeze(1)).float().to(outputs.device) - torch.eye(outputs.size(0)).to(outputs.device)
+    # patient_matrix = patient_matrix + synt_pat_matrix
+    
     # set to zero values between same patients
     similarity_matrix = similarity_matrix * patient_matrix
 
     # get the matrix for same label (1) and different label (0)
     label_matrix = (labels.unsqueeze(0) == labels.unsqueeze(1)).float().to(outputs.device)
     # apply class weights in both dimensions
-    weight_matrix = class_weights[labels].unsqueeze(1) * class_weights[labels].unsqueeze(0)
+    # weight_matrix = class_weights[labels].unsqueeze(1) * class_weights[labels].unsqueeze(0)
 
-    positive_loss = torch.clamp(margin - similarity_matrix, min=0) * label_matrix * weight_matrix # Positive pairs: maximize similarity
+    positive_loss = torch.clamp(margin - similarity_matrix, min=0) * label_matrix # * weight_matrix # Positive pairs: maximize similarity
     negative_loss = torch.clamp(similarity_matrix + margin, min=0) * (1 - label_matrix)  # Negative pairs: minimize similarity
 
     # maximize the similarity between same label and minimize the similarity between different labels
@@ -71,7 +79,7 @@ def sparsity_loss(outputs, k=0.1, p=2):
     loss = (outputs * mask).pow(p).mean()
     return loss
 
-def contrastive_cluster_loss(outputs, patient_ids, margin=0.5):
+def contrastive_cluster_loss(outputs, patient_ids, margin=0.1):
     outs = F.normalize(outputs, p=2, dim=1) # Normalize embeddings
     similarity_matrix = torch.mm(outs, outs.t()) - torch.eye(outputs.size(0)).to(outputs.device)
 
@@ -80,8 +88,8 @@ def contrastive_cluster_loss(outputs, patient_ids, margin=0.5):
     # set to zero values between same patients
     similarity_matrix = similarity_matrix * patient_matrix
 
-    losses = torch.clamp(similarity_matrix + margin, min=0)
-    loss = (losses).sum(dim=1).mean()
+    losses = 1 - (similarity_matrix - 0.2).abs()
+    loss = losses.sum(dim=1).mean()
 
     return loss
 

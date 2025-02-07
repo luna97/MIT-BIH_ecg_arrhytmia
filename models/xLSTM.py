@@ -13,23 +13,18 @@ from xlstm import (
 
 class myxLSTM(nn.Module):
 
-    def __init__(self, in_channels, dropout=0.2, num_classes=5, xlstm_depth=1, activation_fn='leakyrelu', pooling='max', num_leads=2):
+    def __init__(self, in_channels, dropout=0.2, num_classes=5, xlstm_depth=1, activation_fn='leakyrelu', pooling='max', num_leads=2, channels=[32, 64, 128]):
         super(myxLSTM, self).__init__()
         self.dropout = nn.Dropout(dropout)
 
+        self.convs = nn.ModuleList()
+        self.bns = nn.ModuleList()
 
-        self.out_ch_1 = 16
-        self.conv1d1a = nn.Conv1d(in_channels, self.out_ch_1, kernel_size=4, padding=1, bias=False)
-        self.conv1d1b = nn.Conv1d(in_channels, self.out_ch_1, kernel_size=2, padding=0, bias=False)
-        self.batchnorm1 = nn.BatchNorm1d(self.out_ch_1 * 2)
-
-        self.out_ch_2 = 64
-        self.conv1d2 = nn.Conv1d(self.out_ch_1 * 2, self.out_ch_2, kernel_size=3, padding=0, bias=False)
-        self.batchnorm2 = nn.BatchNorm1d(self.out_ch_2)
-
-        self.out_ch_3 = 128
-        self.conv1d3 = nn.Conv1d(self.out_ch_2, self.out_ch_3, kernel_size=3, padding=0, bias=False)
-        self.batchnorm3 = nn.BatchNorm1d(self.out_ch_3)
+        in_ch = in_channels
+        for out_ch in channels:
+            self.convs.append(nn.Conv1d(in_ch, out_ch, kernel_size=3, padding=1))
+            self.bns.append(nn.BatchNorm1d(out_ch))
+            in_ch = out_ch
 
         self.pool_size = 2
         if pooling == 'max':
@@ -52,7 +47,11 @@ class myxLSTM(nn.Module):
         embedding_dim = x.shape[-1]
         print(f"Embedding Dim: {x.shape}")
 
-        self.xlstm = get_xlstm(embedding_dim, xlstm_depth=xlstm_depth, dropout=dropout)
+        self.slstm1a = get_mLSTM(embedding_dim, dropout=dropout)
+        self.slstm1b = get_mLSTM(embedding_dim, dropout=dropout)
+
+        self.mlstma = get_sLSTM(embedding_dim, dropout=dropout)
+        self.mlstmb = get_sLSTM(embedding_dim, dropout=dropout)
 
         #self.fc = nn.Linear(embedding_dim, num_classes)
         self.fc = nn.Sequential(
@@ -62,38 +61,27 @@ class myxLSTM(nn.Module):
         )
 
     def convolve(self, x):
-        x = x.permute(0, 2, 1) # move channels to the last dimension
+        x = x.permute(0, 2, 1)  # move channels to the last dimension
 
-        # first conv block
-        x1 = self.conv1d1a(x)
-        x2 = self.conv1d1b(x)
-        x = torch.cat([x1, x2], dim=1)
-        x = self.batchnorm1(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-        x = self.maxpool(x)
-
-        # second conv block
-        x = self.conv1d2(x)
-        x = self.batchnorm2(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-        x = self.maxpool(x)
-
-        # third conv block
-        x = self.conv1d3(x)
-        x = self.batchnorm3(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-        x = self.maxpool(x)
+        for conv, bn in zip(self.convs, self.bns):
+            x = conv(x)
+            x = bn(x)
+            x = self.activation(x)
+            x = self.dropout(x)
+            x = self.maxpool(x)
 
         x = x.permute(0, 2, 1)
         return x
-    
+            
 
     def get_embeddings(self, x):
         x = self.convolve(x)
-        x = self.xlstm(x)
+        x1 = self.slstm1a(x)
+        x2 = self.slstm1b(x.flip(1))
+        x = x1 + x2.flip(1)
+        x1 = self.mlstma(x)
+        x2 = self.mlstmb(x.flip(1))
+        x = x1 + x2.flip(1)
         return x[:, -1, :]
 
 
@@ -105,6 +93,45 @@ class myxLSTM(nn.Module):
 
     def trainable_parameters(self):
         return self.parameters()
+    
+def get_sLSTM(embedding_dim, dropout=0.2):
+    cfg = xLSTMBlockStackConfig(
+        mlstm_block=None,
+        slstm_block = sLSTMBlockConfig(
+            slstm=sLSTMLayerConfig(
+                backend="cuda",
+                num_heads=4,
+                conv1d_kernel_size=3,
+                bias_init="powerlaw_blockdependent",
+            ),
+            feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu"),
+        ),
+        num_blocks=1,
+        embedding_dim=embedding_dim,
+        dropout=dropout,
+        slstm_at=[0],
+    )
+
+    return xLSTMBlockStack(cfg)
+
+def get_mLSTM(embedding_dim, dropout=0.2):
+    cfg = xLSTMBlockStackConfig(
+        mlstm_block=mLSTMBlockConfig(
+            mlstm=mLSTMLayerConfig(
+                conv1d_kernel_size=3, 
+                qkv_proj_blocksize=4, 
+                num_heads=4,
+            )
+        ),
+        slstm_block=None,
+        num_blocks=1,
+        embedding_dim=embedding_dim,
+        dropout=dropout,
+        context_length=700,
+        slstm_at=[],
+    )
+
+    return xLSTMBlockStack(cfg)
 
 
 def get_xlstm(embedding_dim, xlstm_depth=1, dropout=0.2):

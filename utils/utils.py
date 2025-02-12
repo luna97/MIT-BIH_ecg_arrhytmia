@@ -4,7 +4,7 @@ from prettytable import PrettyTable  # Import PrettyTable for table formatting
 import torch
 import numpy as np
 import random
-from dataset import ECGDataset
+from old.dataset_old import ECGDataset
 from collections import Counter
 from models.xLSTM import myxLSTM
 from models.simple_LSTM import ECG_LSTM, ECG_CONV1D_LSTM
@@ -128,7 +128,7 @@ def get_training_class_weights(train_dataset, num_classes):
 
 def get_model(args):
     if args.model == 'xLSTM':
-        model = myxLSTM(args.num_leads, num_classes=len(args.classes), dropout=args.dropout, xlstm_depth=args.num_layers, activation_fn=args.act_fn, pooling=args.pooling, num_leads=args.num_leads, channels=[32, 64, 128])
+        model = myxLSTM(args.num_leads, num_classes=len(args.classes), dropout=args.dropout, xlstm_depth=args.num_layers, activation_fn=args.act_fn, pooling=args.pooling, num_leads=args.num_leads, channels=[128])
     elif args.model == 'LSTM':
         model = ECG_LSTM(args.input_size, args.hidden_size, args.num_layers, len(args.classes), args.dropout)
     elif args.model == 'CONV1D_LSTM':

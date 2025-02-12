@@ -1,7 +1,7 @@
 import torch
 import warnings
 warnings.filterwarnings('always')
-from dataset import ECGDataset, collate_fn
+from old.dataset_old import ECGDataset, collate_fn
 from models.simple_LSTM import ECG_LSTM, ECG_CONV1D_LSTM
 from models.xLSTM import myxLSTM
 import torch.nn as nn
@@ -55,7 +55,7 @@ parser.add_argument('--pretrain', action='store_true', help='Pretrain model')
 parser.add_argument('--sparse_loss', action='store_true', help='Use sparse loss')
 parser.add_argument('--cluster_loss', action='store_true', help='Use cluster loss')
 parser.add_argument('--separate_pretrain', action='store_true', help='Separate pretrain')
-parser.add_argument('--data_dir', type=str, default='/media/luna97/Volume/data/', help='Data directory')
+parser.add_argument('--data_dir', type=str, default='/media/Volume/data/MIT-BHI/data', help='Data directory')
 parser.add_argument('--linear_probing', action='store_true', help='Linear probing')
 args = parser.parse_args()
 
@@ -142,7 +142,7 @@ if args.pretrain:
 
         if args.skip_validation: continue
 
-        pretrain_loss_val = eval_pretrain_loop(model, test_loader, device, weights, args)
+        pretrain_loss_val = eval_pretrain_loop(model, val_loader, device, weights, args)
 
         if args.separate_pretrain:
             ## evaluation for pretraining only
@@ -158,7 +158,7 @@ if args.pretrain:
                 best_model_state = model.state_dict()
         else:
             # evaluation loop for training head
-            val_loss, val_accuracy, val_f1, _, _, _ = eval_loop(model, criterion, test_loader, device, num_classes)
+            val_loss, val_accuracy, val_f1, _, _, _ = eval_loop(model, criterion, val_loader, device, num_classes)
             print(f"Val Loss: {val_loss:.4f}, Accuracy: {val_accuracy:.4f}, F1 Score: {val_f1:.4f}")
 
             # Save the best model based on validation F1 score
@@ -194,7 +194,7 @@ if args.separate_pretrain or not args.pretrain:
         if args.skip_validation: continue
 
         # evaluation loop
-        val_loss, val_accuracy, val_f1, _, _, _ = eval_loop(model, criterion, test_loader, device, num_classes)
+        val_loss, val_accuracy, val_f1, _, _, _ = eval_loop(model, criterion, val_loader, device, num_classes)
         print(f"Val Loss: {val_loss:.4f}, Accuracy: {val_accuracy:.4f}, F1 Score: {val_f1:.4f}")
 
         # Save the best model based on validation F1 score

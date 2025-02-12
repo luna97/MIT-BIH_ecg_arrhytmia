@@ -1,0 +1,31 @@
+program: trainer.py
+method: random
+name: pretrain-xLSTM
+metric:
+  goal: minimize
+  name: test_loss
+parameters:
+  lr:
+    min: 0.00001
+    max: 0.003
+  batch_size:
+    value: [128, 64]
+  epochs:
+    value: 10
+  optimizer:
+    value: "adamw"
+  patch_size:
+    values: [32, 64]
+  embedding_size:
+    values: [32, 64, 128, 256]
+  activation_fn:
+    value: "relu"
+  xLSTM_depth:
+    values: [1, 2, 5]
+  dropout:
+    min: 0.1
+    max: 0.5
+  normalize:
+    value: True
+  wandb_log:
+    value: True

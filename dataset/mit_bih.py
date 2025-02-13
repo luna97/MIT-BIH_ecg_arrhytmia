@@ -3,13 +3,13 @@ import os
 import pandas as pd
 import wfdb
 
-class ECGDataset(torch.utils.data.Dataset):
+class ECGMITBIHDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_folder, subset='train', num_leads=1, name='t_wave_split', oversample=False, random_shift_window=False, patch_size=64, normalize=True):
+    def __init__(self, data_folder, subset='train', num_leads=1, name='t_wave_split', oversample=False, random_shift=False, patch_size=64, normalize=True):
         self.data_folder = data_folder
         self.subset = subset
         self.samples = []
-        self.random_shift_window = random_shift_window
+        self.random_shift = random_shift
         self.num_leads = num_leads
         self.samples = pd.read_csv(os.path.join(data_folder, name, f'labels_{subset}.csv'))
         if not oversample:
@@ -45,7 +45,7 @@ class ECGDataset(torch.utils.data.Dataset):
         patient = sample['patient']
         heartbeat_signal = self.signals[patient][sample['hb_start']:sample['hb_end'], :self.num_leads]
         if self.normalize: heartbeat_signal = (heartbeat_signal - heartbeat_signal.mean(axis=0)) / (heartbeat_signal.std(axis=0) + 1e-6)
-        if self.random_shift_window:
+        if self.random_shift:
             window_start = sample['win_start']
             window_end = sample['win_end']
             shift = torch.randint(- self.patch_size // 3, self.patch_size // 3, (1,)).item() # shift between 0 and patch_size // 3
@@ -64,8 +64,8 @@ class ECGDataset(torch.utils.data.Dataset):
         if self.normalize: window_signal = (window_signal - window_signal.mean(axis=0)) / (window_signal.std(axis=0) + 1e-6)
 
         return {
-            'heartbeat_signal': torch.tensor(heartbeat_signal, dtype=torch.float32),
-            'window_signal': torch.tensor(window_signal, dtype=torch.float32),
+            'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),
+            'signal': torch.tensor(window_signal, dtype=torch.float32),
             'label': self.get_label_int(sample['label'])
         }
     
@@ -79,10 +79,8 @@ class ECGDataset(torch.utils.data.Dataset):
             df_patient = self.samples[self.samples['patient'] == patient]
             num_samples = len(df_patient)
             val_len = int(val_size * num_samples)
-            # the first 0.8 of the patients go to the training set
-            # print(f'Adding {num_samples - val_len} samples of patient {patient} to the training set from indexes {count} to {count + num_samples - val_len}')
-            # print(f'Adding {val_len} samples of patient {patient} to the validation set from indexes {count + num_samples - val_len} to {count + num_samples}')
 
+            # the first 0.8 of the patients go to the training set
             ids_train.extend(range(count, count + num_samples - val_len))
             ids_val.extend(range(count + num_samples - val_len, count + num_samples))
             count += num_samples
@@ -90,11 +88,12 @@ class ECGDataset(torch.utils.data.Dataset):
 
     
 def collate_fn(batch):
-    heartbeat_signals = torch.nn.utils.rnn.pad_sequence([item['heartbeat_signal'] for item in batch])
-    window_signals = torch.nn.utils.rnn.pad_sequence([item['window_signal'] for item in batch])
+    heartbeat_signals = torch.nn.utils.rnn.pad_sequence([item['heartbeat'] for item in batch])
+    window_signals = torch.nn.utils.rnn.pad_sequence([item['signal'] for item in batch])
     labels = torch.tensor([item['label'] for item in batch])
+    # print('signals shape', window_signals.shape)
     return {
-        'heartbeat_signals': heartbeat_signals.squeeze(),
-        'window_signals': window_signals.squeeze(),
-        'labels': labels
+        'heartbeat': heartbeat_signals.squeeze(),
+        'signal': window_signals.squeeze(),
+        'label': labels
     }

@@ -37,25 +37,26 @@ class myxLSTM(nn.Module):
         elif pooling == 'avg':
             self.pool = nn.AvgPool1d(kernel_size=2)
 
+        size_ln1 = (self.patch_size - 4) 
+        size_ln2 = (size_ln1 - 4) 
+        size_ln3 = (size_ln2 - 4) 
+
         self.encoder = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=3, padding=0), # from 64 to 6
+            nn.Conv1d(1, 32, kernel_size=5, padding=0), # from 64 to 6
             # self.pool, # from 60 to 30, 11 to 7
             self.activation,
-            # nn.LayerNorm(self.patch_size - 2),
-            # nn.BatchNorm1d(32),
+            nn.LayerNorm(size_ln1),
             nn.Dropout(dropout),
-            nn.Conv1d(32, 64, kernel_size=3, padding=0), # from 30 to 26, 7 to 5
+            nn.Conv1d(32, 64, kernel_size=5, padding=0), # from 30 to 26, 7 to 5
             # self.pool, # from 26 to 13, 5 to 2
             self.activation,
-            # nn.LayerNorm(self.patch_size - 4),
-            #nn.BatchNorm1d(64),
+            nn.LayerNorm(size_ln2),
             nn.Dropout(dropout),
-            nn.Conv1d(64, 128, kernel_size=3, padding=0), # from 13 to 9
-            # nn.LayerNorm(self.patch_size - 6),
-            #self.pool, # from 9 to 4
+            nn.Conv1d(64, 128, kernel_size=5, padding=0), # from 13 to 9
+            # self.pool, # from 9 to 4
             self.activation,
-            #nn.BatchNorm1d(128),
-            #nn.Dropout(dropout),
+            nn.LayerNorm(size_ln3),
+            nn.Dropout(dropout),
         )
 
         self.sep_token = nn.Parameter(torch.randn(1, 1, embedding_dim))
@@ -74,14 +75,6 @@ class myxLSTM(nn.Module):
             nn.Linear(embedding_dim, embedding_dim // 2),
             self.activation,
             nn.Linear(embedding_dim // 2, num_classes),
-        )
-
-        self.rec = nn.Sequential(
-            nn.ConvTranspose1d(embedding_dim, embedding_dim // 2, kernel_size=3, stride=2, padding=0), # from 1 to 5
-            self.activation,
-            nn.BatchNorm1d(embedding_dim // 2),
-            nn.Dropout(dropout),
-            nn.ConvTranspose1d(embedding_dim // 2, self.patch_size, kernel_size=3, stride=2, padding=0), # from 5 to 13
         )
 
         self.reconstruction = nn.Sequential(
@@ -143,24 +136,6 @@ class myxLSTM(nn.Module):
     def trainable_parameters(self):
         return self.parameters()
     
-
-class EncoderLayer(nn.Module):
-    def __init__(self, input_size, hidden_size, activation_fn='relu'):
-        super().__init__()
-
-        if activation_fn == 'relu':
-            self.activation = nn.ReLU()
-        elif activation_fn == 'leakyrelu':
-            self.activation = nn.LeakyReLU()
-
-        self.encoder = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
-            self.activation,
-            nn.Linear(hidden_size, hidden_size),
-            self.activation,
-        )
-
-        self.final = nn.Linear(hidden_size, hidden_size)
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':

@@ -1,5 +1,5 @@
 
-from trainer_pretrain import train
+from pretrain import train
 import lightning as L
 import wandb
 

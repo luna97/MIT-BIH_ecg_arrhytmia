@@ -1,4 +1,4 @@
-program: trainer.py
+program: sweep.py
 method: random
 name: pretrain-xLSTM
 metric:
@@ -9,7 +9,7 @@ parameters:
     min: 0.00001
     max: 0.003
   batch_size:
-    value: [128, 64]
+    values: 128
   epochs:
     value: 10
   optimizer:
@@ -19,9 +19,9 @@ parameters:
   embedding_size:
     values: [32, 64, 128, 256]
   activation_fn:
-    value: "relu"
+    value: 'relu'
   xLSTM_depth:
-    values: [1, 2, 5]
+    values: [5, 7, 11]
   dropout:
     min: 0.1
     max: 0.5

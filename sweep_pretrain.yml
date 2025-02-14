@@ -1,0 +1,47 @@
+program: sweep_pretrain.py
+method: random
+name: pretrain-xLSTM
+metric:
+  goal: minimize
+  name: test_loss
+parameters:
+  pretrain:
+    value: True
+  lr:
+    value: 0.001
+  wd:
+    value: 0.0001
+  batch_size:
+    value: 128
+  epochs:
+    value: 50
+  optimizer:
+    value: "adamw"
+  patch_size:
+    value: 64
+  embedding_size:
+    values: [128, 256, 512]
+  activation_fn:
+    value: 'relu'
+  xLSTM_depth:
+    value: 5
+  dropout:
+    value: 0.3
+  normalize:
+    value: True
+  wandb_log:
+    value: True
+  random_shift:
+    value: True
+  data_folder_mit:
+    value: '/media/Volume/data/MIT-BHI/data/'
+  pretrain_with_code15:
+    value: True
+  num_workers:
+    value: 4
+  nk_clean:
+    value: False
+  use_scheduler:
+    value: True
+  data_folder_code15:
+    value: '/media/Volume/data/CODE15/unlabeled_records_360'

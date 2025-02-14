@@ -31,19 +31,23 @@ class ECGCODE15Dataset(Dataset):
         # remove a random number of datapoints from the signal from 0 to patch size 
         if self.random_shift:
             shift = np.random.randint(0, self.patch_size // 2)
-            signal = signal[shift:]
+            if shift > 0 and len(signal) > shift:
+                signal = signal[shift:]
+            elif shift != 0:
+                print('there is a problem with the shift, signal length', len(signal), 'shift', shift)
 
-        signal = torch.tensor(signal[:, :self.num_leads], dtype=torch.float32)
+        signal = torch.tensor(signal[:, :self.num_leads], dtype=torch.float32).squeeze()
+
+        # if the signal contains NaNs, replace them with 0
+        signal[torch.isnan(signal)] = 0
 
         # normalize the signal by subtracting the mean and dividing by the standard deviation
-        if self.normalize: signal = (signal - signal.mean(axis=0)) / signal.std(axis=0)
-
-
-        # print(f'idx {idx}, signal shape {signal.shape}')
-
+        if self.normalize:
+            if np.abs(signal).max() > 0:
+                signal = signal / np.abs(signal).max()
+            
         return {
-            'signal': signal
-            # 'label': torch.tensor(label, dtype=torch.float)
+            'signal': signal,
         }
     
     def split_validation_training(self, val_size_pct = 0.1):
@@ -60,9 +64,18 @@ class ECGCODE15Dataset(Dataset):
         return train_dataset, val_dataset
     
 def collate_fn(batch):
-    signals = torch.nn.utils.rnn.pad_sequence([item['signal'] for item in batch])
-    # print(f'signals shape {signals.shape}')
+    signals = [item['signal'] for item in batch]
+    masks = [torch.ones_like(item['signal'], dtype=torch.bool) for item in batch]
+    try:
+        padded_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
+    except:
+        print('signals', signals)
+        print('signals shape', [s.shape for s in signals])
+        
+    padded_masks = torch.nn.utils.rnn.pad_sequence(masks, batch_first=True)
+
     return {
-        'signal': signals.squeeze(),
+        'signal': padded_signals.squeeze(),
+        'mask': padded_masks.squeeze(),
     }
 

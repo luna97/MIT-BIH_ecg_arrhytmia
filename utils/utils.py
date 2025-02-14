@@ -108,12 +108,12 @@ def get_datasets(args, train_transform, data_dir):
 
   return train_dataset, val_dataset, test_dataset
 
-def get_training_class_weights(train_dataset, num_classes):
+def get_training_class_weights(train_dataset):
   """
   Returns the class weights for the training dataset.
   """
   # 2. Instantiate Model, Loss, and Optimizer
-  labels = [label for _, label, _ in train_dataset]
+  labels = [sample['label'] for sample in train_dataset]
   # labels = train_dataset.get_labels()
   class_counts = Counter(labels)
   print(f"Class Counts: {class_counts}")

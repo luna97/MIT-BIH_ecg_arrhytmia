@@ -2,14 +2,17 @@ import torch
 import os
 import pandas as pd
 import wfdb
+import neurokit2 as nk
+import numpy as np
 
 class ECGMITBIHDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_folder, subset='train', num_leads=1, name='t_wave_split', oversample=False, random_shift=False, patch_size=64, normalize=True):
+    def __init__(self, data_folder, subset='train', num_leads=1, name='t_wave_split', oversample=False, random_shift=False, patch_size=64, normalize=True, nkclean=False):
         self.data_folder = data_folder
         self.subset = subset
         self.samples = []
         self.random_shift = random_shift
+        self.nkclean = nkclean
         self.num_leads = num_leads
         self.samples = pd.read_csv(os.path.join(data_folder, name, f'labels_{subset}.csv'))
         if not oversample:
@@ -28,6 +31,7 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             # normalize the signal
             if normalize:
                 signal = (signal - signal.mean(axis=0)) / signal.std(axis=0)
+
             self.signals[patient] = signal
 
     def __len__(self):
@@ -61,11 +65,16 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         if window_signal.shape[0] == 0:
             print(f'index {idx}, patient {patient}, window_signal shape {window_signal.shape}, heartbeat_signal shape {heartbeat_signal.shape}')
 
-        if self.normalize: window_signal = (window_signal - window_signal.mean(axis=0)) / (window_signal.std(axis=0) + 1e-6)
+        if self.nkclean:
+            window_signal = nk.ecg_clean(window_signal[:, 0], sampling_rate=360, method='neurokit').copy()
+
+        if self.normalize:
+            window_signal = window_signal / np.abs(window_signal).max()
+            heartbeat_signal = heartbeat_signal / np.abs(heartbeat_signal).max() 
 
         return {
             'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),
-            'signal': torch.tensor(window_signal, dtype=torch.float32),
+            'signal': torch.tensor(window_signal, dtype=torch.float32).unsqueeze(1),
             'label': self.get_label_int(sample['label'])
         }
     
@@ -88,12 +97,20 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
 
     
 def collate_fn(batch):
-    heartbeat_signals = torch.nn.utils.rnn.pad_sequence([item['heartbeat'] for item in batch])
-    window_signals = torch.nn.utils.rnn.pad_sequence([item['signal'] for item in batch])
+    signals = [item['signal'] for item in batch]
+    hb = [item['heartbeat'] for item in batch]
+    mask_signals = [torch.ones_like(item['signal'], dtype=torch.bool) for item in batch]
+    mask_hb = [torch.ones_like(item['heartbeat'], dtype=torch.bool) for item in batch]
+    heartbeat_signals = torch.nn.utils.rnn.pad_sequence(hb, batch_first=True)
+    window_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
     labels = torch.tensor([item['label'] for item in batch])
+    mask_signals = torch.nn.utils.rnn.pad_sequence(mask_signals, batch_first=True)
+    mask_hb = torch.nn.utils.rnn.pad_sequence(mask_hb, batch_first=True)
     # print('signals shape', window_signals.shape)
     return {
         'heartbeat': heartbeat_signals.squeeze(),
+        'mask_hb': mask_hb.squeeze(),
         'signal': window_signals.squeeze(),
+        'mask': mask_signals.squeeze(),
         'label': labels
     }

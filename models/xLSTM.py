@@ -41,7 +41,10 @@ class myxLSTM(nn.Module):
         size_ln2 = (size_ln1 - 4) 
         size_ln3 = (size_ln2 - 4) 
 
+        self.patch_embedding = nn.Conv1d(1, embedding_dim, kernel_size=self.patch_size, stride=self.patch_size)
+
         self.encoder = nn.Sequential(
+            # nn.LayerNorm(self.patch_size),
             nn.Conv1d(1, 32, kernel_size=5, padding=0), # from 64 to 6
             # self.pool, # from 60 to 30, 11 to 7
             self.activation,
@@ -83,9 +86,15 @@ class myxLSTM(nn.Module):
             nn.Linear(embedding_dim // 2, self.patch_size),
         )
 
+
+
+
     def seq_to_token(self, x):
+        if len(x.shape) == 1:
+            # it may miss the batch dimension for the case of a single sample
+            x = x.unsqueeze(-1)
         # convert from [batch_size, seq_len, 1] to [batch_size, seq_len // 64, 64], padding with zeros if necessary
-        x = x.permute(1, 0) 
+        # x = x.permute(1, 0) 
         batch_size, seq_len = x.shape
         # print('starting from a tensor of shape', x.shape)
         if seq_len % self.patch_size != 0:
@@ -98,9 +107,6 @@ class myxLSTM(nn.Module):
         return x, batch_size, num_patches
     
     def tokenize_signal(self, x):
-        if len(x.shape) == 1:
-            # it may miss the batch dimension for the case of a single sample
-            x = x.unsqueeze(-1)
         x, batch_size, num_patches = self.seq_to_token(x)
         x = x.reshape(x.shape[0] * x.shape[1], 1, self.patch_size)
         x = self.encoder(x) # [batch_size, seq_len // 64, 128, 4]
@@ -135,6 +141,9 @@ class myxLSTM(nn.Module):
 
     def trainable_parameters(self):
         return self.parameters()
+    
+    def head_parameters(self):
+        return self.fc.parameters() 
     
 
 def get_activation_fn(activation_fn):

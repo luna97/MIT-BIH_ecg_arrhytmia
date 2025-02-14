@@ -11,6 +11,7 @@ parser = argparse.ArgumentParser(description='Create dataset for MIT-BIH')
 parser.add_argument('--data_folder', type=str, default='/media/Volume/data/MIT-BHI/data/', help='Path to raw data folder')
 parser.add_argument('--hb_split_type', type=str, default='t_wave', help='How to split the heartbeats, either t_wave or static')
 parser.add_argument('--name', type=str, default='t_wave_split', help='Name of the split')
+parser.add_argument('--nk_clean', action='store_true', help='Use neurokit2 to clean the signal')
 args = parser.parse_args()
 
 

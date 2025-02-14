@@ -34,9 +34,7 @@ parser.add_argument('--data_folder_code15', type=str, default='/media/Volume/dat
 
 
 def pretrain(config, run=None, wandb=False):
-    xlstm = myxLSTM(patch_size=config.patch_size, dropout=config.dropout, embedding_dim=config.embedding_size, activation_fn=config.activation_fn, xlstm_depth=config.xLSTM_depth)
-    model = PretrainedxLSTMNetwork(model=xlstm, lr=config.lr,optimizer=config.optimizer, batch_size=config.batch_size, wd=config.wd, use_scheduler=config.use_scheduler)
-        
+
     if not config.pretrain_with_code15:
         dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='train', num_leads=1, oversample=config.oversample, random_shift=config.random_shift, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
 
@@ -57,6 +55,9 @@ def pretrain(config, run=None, wandb=False):
     test_dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='test', num_leads=1, oversample=False, random_shift=False, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
     test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
     
+    xlstm = myxLSTM(patch_size=config.patch_size, dropout=config.dropout, embedding_dim=config.embedding_size, activation_fn=config.activation_fn, xlstm_depth=config.xLSTM_depth)
+    model = PretrainedxLSTMNetwork(model=xlstm, lr=config.lr,optimizer=config.optimizer, batch_size=config.batch_size, wd=config.wd, use_scheduler=config.use_scheduler, patch_size=config.patch_size)
+        
     checkpoint_callback = ModelCheckpoint(monitor='val_loss')
     # early_stopping = EarlyStopping(monitor='val_loss', patience=3)
 

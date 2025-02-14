@@ -48,7 +48,7 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         sample = self.samples.iloc[idx]
         patient = sample['patient']
         heartbeat_signal = self.signals[patient][sample['hb_start']:sample['hb_end'], :self.num_leads]
-        if self.normalize: heartbeat_signal = (heartbeat_signal - heartbeat_signal.mean(axis=0)) / (heartbeat_signal.std(axis=0) + 1e-6)
+
         if self.random_shift:
             window_start = sample['win_start']
             window_end = sample['win_end']
@@ -69,12 +69,14 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             window_signal = nk.ecg_clean(window_signal[:, 0], sampling_rate=360, method='neurokit').copy()
 
         if self.normalize:
-            window_signal = window_signal / np.abs(window_signal).max()
-            heartbeat_signal = heartbeat_signal / np.abs(heartbeat_signal).max() 
+            if window_signal.std(axis=0) != 0:
+                window_signal = (window_signal - window_signal.mean(axis=0)) / window_signal.std(axis=0)
+            if heartbeat_signal.std(axis=0) != 0:
+                heartbeat_signal = (heartbeat_signal - heartbeat_signal.mean(axis=0)) / heartbeat_signal.std(axis=0)
 
         return {
             'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),
-            'signal': torch.tensor(window_signal, dtype=torch.float32).unsqueeze(1),
+            'signal': torch.tensor(window_signal, dtype=torch.float32),
             'label': self.get_label_int(sample['label'])
         }
     
@@ -101,6 +103,7 @@ def collate_fn(batch):
     hb = [item['heartbeat'] for item in batch]
     mask_signals = [torch.ones_like(item['signal'], dtype=torch.bool) for item in batch]
     mask_hb = [torch.ones_like(item['heartbeat'], dtype=torch.bool) for item in batch]
+    # print('signals shape', [s.shape for s in hb])
     heartbeat_signals = torch.nn.utils.rnn.pad_sequence(hb, batch_first=True)
     window_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
     labels = torch.tensor([item['label'] for item in batch])
@@ -108,9 +111,9 @@ def collate_fn(batch):
     mask_hb = torch.nn.utils.rnn.pad_sequence(mask_hb, batch_first=True)
     # print('signals shape', window_signals.shape)
     return {
-        'heartbeat': heartbeat_signals.squeeze(),
-        'mask_hb': mask_hb.squeeze(),
-        'signal': window_signals.squeeze(),
-        'mask': mask_signals.squeeze(),
+        'heartbeat': heartbeat_signals,
+        'mask_hb': mask_hb,
+        'signal': window_signals,
+        'mask': mask_signals,
         'label': labels
     }

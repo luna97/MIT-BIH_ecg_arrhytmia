@@ -14,7 +14,8 @@ class PretrainedxLSTMNetwork(L.LightningModule):
             wd=0.0001,
             use_scheduler=False,
             scheduler_factor=0.1,
-            scheduler_patience=5
+            scheduler_patience=5,
+            patch_size=64
         ):
         super().__init__()
         self.lr = lr
@@ -25,6 +26,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         self.use_scheduler = use_scheduler
         self.scheduler_factor = scheduler_factor
         self.scheduler_patience = scheduler_patience
+        self.patch_size = patch_size
         self.save_hyperparameters()
 
     def training_step(self, batch, _):
@@ -53,19 +55,25 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         # print('initial mask shape', mask.shape)
         # print('initial x shape', x.shape)
         reconstruct = self.model.reconstruct(x)
-        shift_reconstruct = reconstruct[:, :-1]
-        shift_reconstruct = shift_reconstruct
-        x, _, _ = self.model.seq_to_token(x)
-        shift_x = x[:, 1:].squeeze()
+        # print('reconstruct shape', reconstruct.shape)
+        # shift_reconstruct = reconstruct[:, :-1]
+        # shift_reconstruct = shift_reconstruct
 
-        tok_mask, _, _ = self.model.seq_to_token(mask) # batch_size, num_patches, patch_size
-        tok_mask = tok_mask[:, 1:]
-        # all the patches that contains at least one zero should be set to zero
-        mask = tok_mask.sum(dim=-1) == 0
-        # mask = mask.unsqueeze(-1).unsqueeze(-1).expand_as(shift_reconstruct)
+        # get rid of the exeding part on the original signal
+        shift_x = x[:, :reconstruct.shape[1]]
+        shift_x = shift_x[:, self.patch_size:].squeeze()
 
-        shift_reconstruct = shift_reconstruct.masked_fill(mask, 0)
-        shift_x = shift_x.masked_fill(mask, 0)
+        mask_shifted = mask[:, :reconstruct.shape[1]]
+        mask_shifted = mask_shifted[:, self.patch_size:].squeeze()
+
+        shift_reconstruct = reconstruct[:, :-self.patch_size]
+
+        #print('mask shape', mask.shape)
+        #print('x shape', x.shape)   
+        #print('reconstruct shape', shift_reconstruct.shape)
+
+        shift_reconstruct = shift_reconstruct.masked_fill(mask_shifted, 0)
+        shift_x = shift_x.masked_fill(mask_shifted, 0)
 
         # calculate the loss
         mse = nn.functional.mse_loss(shift_reconstruct, shift_x)

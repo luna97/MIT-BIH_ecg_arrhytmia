@@ -36,15 +36,16 @@ class ECGCODE15Dataset(Dataset):
             elif shift != 0:
                 print('there is a problem with the shift, signal length', len(signal), 'shift', shift)
 
-        signal = torch.tensor(signal[:, :self.num_leads], dtype=torch.float32).squeeze()
+        signal = torch.tensor(signal[:, :self.num_leads], dtype=torch.float32)
+        # print('dioss shape', signal.shape)
 
         # if the signal contains NaNs, replace them with 0
         signal[torch.isnan(signal)] = 0
 
         # normalize the signal by subtracting the mean and dividing by the standard deviation
         if self.normalize:
-            if np.abs(signal).max() > 0:
-                signal = signal / np.abs(signal).max()
+            if signal.std(axis=0) != 0:
+                signal = (signal - signal.mean(axis=0)) / signal.std(axis=0)
             
         return {
             'signal': signal,
@@ -75,7 +76,7 @@ def collate_fn(batch):
     padded_masks = torch.nn.utils.rnn.pad_sequence(masks, batch_first=True)
 
     return {
-        'signal': padded_signals.squeeze(),
-        'mask': padded_masks.squeeze(),
+        'signal': padded_signals,
+        'mask': padded_masks,
     }
 

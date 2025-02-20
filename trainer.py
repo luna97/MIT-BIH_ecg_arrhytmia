@@ -2,83 +2,121 @@ from torch import optim, nn
 import lightning as L
 import torchmetrics
 import torchmetrics.classification
+from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss
+import torch
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # define the LightningModule
 class PretrainedxLSTMNetwork(L.LightningModule):
     def __init__(
             self, 
             model, 
-            lr=1e-3, 
-            batch_size=32, 
-            optimizer='adam', 
-            wd=0.0001,
-            use_scheduler=False,
-            scheduler_factor=0.1,
-            scheduler_patience=5,
-            patch_size=64
+            config
         ):
         super().__init__()
-        self.lr = lr
+        self.lr = config.lr
         self.model = model
-        self.batch_size = batch_size
-        self.optimizer = optimizer
-        self.wd = wd
-        self.use_scheduler = use_scheduler
-        self.scheduler_factor = scheduler_factor
-        self.scheduler_patience = scheduler_patience
-        self.patch_size = patch_size
+        self.batch_size = config.batch_size
+        self.optimizer = config.optimizer
+        self.wd = config.wd
+        self.use_scheduler = config.use_scheduler
+        self.patch_size = config.patch_size
+        self.multi_token_prediction = config.multi_token_prediction
+        self.epochs = config.epochs
+        self.loss_type = config.loss_type
+        self.config = config
         self.save_hyperparameters()
 
     def training_step(self, batch, _):
-        loss, mae = self.reconstruct_batch(batch)
+        loss = self.reconstruct_batch(batch, step='train')
         # Logging to TensorBoard (if installed) by default
         self.log("train_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
-        self.log("train_mae", mae.item(), prog_bar=True, batch_size=self.batch_size)
         return loss
     
     def validation_step(self, batch, _):
-        loss, mae = self.reconstruct_batch(batch)
+        loss = self.reconstruct_batch(batch)
         self.log("val_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
-        self.log("val_mae", mae.item(), prog_bar=True, batch_size=self.batch_size)
         return loss
     
     def test_step(self, batch, _):
-        loss, mae = self.reconstruct_batch(batch)
-        self.log("test_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
-        self.log("test_mae", mae.item(), prog_bar=True, batch_size=self.batch_size)
+        loss = self.reconstruct_batch(batch)
+        self.log("test_mse", mse.item(), prog_bar=True, batch_size=self.batch_size)
         return loss
 
     
-    def reconstruct_batch(self, batch):
+    def reconstruct_batch(self, batch, step):
         x = batch["signal"]
         mask = batch["mask"]
-        # print('initial mask shape', mask.shape)
-        # print('initial x shape', x.shape)
-        reconstruct = self.model.reconstruct(x)
-        # print('reconstruct shape', reconstruct.shape)
-        # shift_reconstruct = reconstruct[:, :-1]
-        # shift_reconstruct = shift_reconstruct
+        tab_data = batch["tab_data"]
 
-        # get rid of the exeding part on the original signal
-        shift_x = x[:, :reconstruct.shape[1]]
-        shift_x = shift_x[:, self.patch_size:].squeeze()
+        if not self.multi_token_prediction:
 
-        mask_shifted = mask[:, :reconstruct.shape[1]]
-        mask_shifted = mask_shifted[:, self.patch_size:].squeeze()
+            reconstruct = self.model.reconstruct(x, tab_data)
 
-        shift_reconstruct = reconstruct[:, :-self.patch_size]
+            # get rid of the exeding part on the original signal
+            shift_x = x[:, :reconstruct.shape[1]]
+            shift_x = shift_x[:, self.patch_size:].squeeze()
 
-        #print('mask shape', mask.shape)
-        #print('x shape', x.shape)   
-        #print('reconstruct shape', shift_reconstruct.shape)
+            mask_shifted = mask[:, :reconstruct.shape[1]]
+            mask_shifted = mask_shifted[:, self.patch_size:].squeeze()
 
-        shift_reconstruct = shift_reconstruct.masked_fill(mask_shifted, 0)
-        shift_x = shift_x.masked_fill(mask_shifted, 0)
+            shift_reconstruct = reconstruct[:, :-self.patch_size]
 
-        # calculate the loss
-        mse = nn.functional.mse_loss(shift_reconstruct, shift_x)
-        mae = nn.functional.l1_loss(shift_reconstruct, shift_x)
-        return mse, mae
+            # calculate the loss
+            mae = masked_mae_loss(shift_reconstruct, shift_x, mask=mask_shifted)
+            mse = masked_mse_loss(shift_reconstruct, shift_x, mask=mask_shifted)
+            grad_loss = gradient_loss(shift_reconstruct, shift_x, mask=mask_shifted)
+
+        else:
+            r1, r2, r3, r4 = self.model.reconstruct(x, tab_data)
+            # get rid of exeding part on the original signal
+            shift_x = x[:, :r1.shape[1]]
+
+            shift_x1 = shift_x[:, self.patch_size:].squeeze()
+            shift_x2 = shift_x[:, self.patch_size * 2:].squeeze()
+            shift_x3 = shift_x[:, self.patch_size * 3:].squeeze()
+            shift_x4 = shift_x[:, self.patch_size * 4:].squeeze()
+
+            mask_shifted = mask[:, :r1.shape[1]]
+            mask_shifted1 = mask_shifted[:, self.patch_size:].squeeze()
+            mask_shifted2 = mask_shifted[:, self.patch_size * 2:].squeeze()
+            mask_shifted3 = mask_shifted[:, self.patch_size * 3:].squeeze()
+            mask_shifted4 = mask_shifted[:, self.patch_size * 4:].squeeze()
+
+            shift_reconstruct1 = r1[:, :-self.patch_size]
+            shift_reconstruct2 = r2[:, :-self.patch_size * 2]
+            shift_reconstruct3 = r3[:, :-self.patch_size * 3]
+            shift_reconstruct4 = r4[:, :-self.patch_size * 4]
+
+            mae1 = masked_mae_loss(shift_reconstruct1, shift_x1, mask=mask_shifted1)
+            mae2 = masked_mae_loss(shift_reconstruct2, shift_x2, mask=mask_shifted2)
+            mae3 = masked_mae_loss(shift_reconstruct3, shift_x3, mask=mask_shifted3)
+            mae4 = masked_mae_loss(shift_reconstruct4, shift_x4, mask=mask_shifted4)
+            mae = (mae1 + mae2 + mae3 + mae4) / 4
+
+            mse1 = masked_mse_loss(shift_reconstruct1, shift_x1, mask=mask_shifted1)
+            mse2 = masked_mse_loss(shift_reconstruct2, shift_x2, mask=mask_shifted2)
+            mse3 = masked_mse_loss(shift_reconstruct3, shift_x3, mask=mask_shifted3)
+            mse4 = masked_mse_loss(shift_reconstruct4, shift_x4, mask=mask_shifted4)
+            mse = (mse1 + mse2 + mse3 + mse4) / 4
+
+            grad_loss1 = gradient_loss(shift_reconstruct1, shift_x1, mask=mask_shifted1)
+            grad_loss2 = gradient_loss(shift_reconstruct2, shift_x2, mask=mask_shifted2)
+            grad_loss3 = gradient_loss(shift_reconstruct3, shift_x3, mask=mask_shifted3)
+            grad_loss4 = gradient_loss(shift_reconstruct4, shift_x4, mask=mask_shifted4)
+            grad_loss = (grad_loss1 + grad_loss2 + grad_loss3 + grad_loss4) / 4
+
+
+        self.log(f"{step}_mse", mse.item(), prog_bar=True, batch_size=self.batch_size)
+        self.log(f"{step}_mae", mae.item(), prog_bar=True, batch_size=self.batch_size)
+        self.log(f"{step}_grad", grad_loss.item(), prog_bar=True, batch_size=self.batch_size)
+
+        if self.loss_type == 'mae':
+            return mae
+        elif self.loss_type == 'grad':
+            return grad_loss + mse 
+        else:
+            return mse
 
     def configure_optimizers(self):
         if self.optimizer == 'adam':
@@ -89,23 +127,17 @@ class PretrainedxLSTMNetwork(L.LightningModule):
             optimizer = optim.SGD(self.parameters(), lr=self.lr, weight_decay=self.wd)
 
         if self.use_scheduler:
-            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer,
-                mode='min',
-                factor=self.scheduler_factor,
-                patience=self.scheduler_patience,
-                verbose=True
-            )
+            sched = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
             scheduler = {
-                'scheduler': scheduler,
-                'monitor': 'val_loss',  # Metric to monitor
-                'interval': 'epoch',
-                'frequency': 1  
+                'scheduler': sched,
+                'interval': 'epoch', # or 'step' 
+                'frequency': 1,
+                'monitor': 'val_loss',
             }
             return [optimizer], [scheduler]
         else:
             return [optimizer]
-    
+
 
 class TrainingxLSTMNetwork(L.LightningModule):
     def __init__(self, model, lr_head=1e-3, lr_xlstm=1e-4, batch_size=32, optimizer='adam', num_classes=5, wd=0.0001, weights=None):

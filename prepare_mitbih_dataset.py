@@ -73,7 +73,7 @@ def crete_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_
         file_path = os.path.join(data_folder + name, f'labels_{split}.csv')
         if not os.path.exists(file_path):
             with open(file_path, 'w') as f:
-                f.write('patient,sample_id,orig_label,label,hb_start,hb_end,r_peak,is_oversampled,win_start,win_end\n')
+                f.write('patient,sample_id,orig_label,label,hb_start,hb_end,r_peak,is_oversampled,win_start,win_end,age,sex\n')
 
         with open(file_path, 'a') as f:
             start = 0

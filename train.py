@@ -30,6 +30,8 @@ parser.add_argument('--oversample', action='store_true', help='Oversample the da
 parser.add_argument('--random_shift', action='store_true', help='Random shift the data on the training set')
 parser.add_argument('--data_folder_mit', type=str, default='/media/Volume/data/MIT-BHI/data/', help='Data folder for MIT-BHI dataset')
 parser.add_argument('--checkpoint', type=str, help='Checkpoint name', required=True)
+parser.add_argument('--patch_embedding', type=str, default=None, help='Patch embedding type')
+parser.add_argument('--multi_token', action='store_true', help='Multi token prediction')
 
 
 def train(config, run=None, wandb=False):
@@ -48,9 +50,9 @@ def train(config, run=None, wandb=False):
     checkpoint = torch.load(args.checkpoint)
     new_state_dict = {k.replace('model.', ''): v for k, v in checkpoint['state_dict'].items()}
 
-    xlstm = myxLSTM(patch_size=config.patch_size, dropout=config.dropout, embedding_dim=config.embedding_size, activation_fn=config.activation_fn, xlstm_depth=config.xLSTM_depth)
+    xlstm = myxLSTM(patch_size=config.patch_size, dropout=config.dropout, embedding_dim=config.embedding_size, activation_fn=config.activation_fn, xlstm_depth=config.xLSTM_depth, patch_embedding=config.patch_embedding, multi_token_prediction=config.multi_token)
     xlstm.load_state_dict(new_state_dict)   
-    model = TrainingxLSTMNetwork(model=xlstm, lr_head=config.lr_head, lr_xlstm=config.lr_xlstm, optimizer=config.optimizer, batch_size=config.batch_size, wd=config.wd, weights=weights)
+    model = TrainingxLSTMNetwork(model=xlstm, lr_head=config.lr_head, lr_xlstm=config.lr_xlstm, optimizer=config.optimizer, batch_size=config.batch_size, wd=config.wd, weights=weights, multi_token_prediction=config.multi_token)
 
     checkpoint_callback = ModelCheckpoint(monitor='val_loss')
 

@@ -3,6 +3,7 @@ import numpy as np
 import random
 from torch import nn
 from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLayerConfig, sLSTMBlockConfig, xLSTMBlockStackConfig, xLSTMBlockStack
+from models.PatchEmbedding import PatchEmbedding
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':
@@ -13,6 +14,7 @@ def get_activation_fn(activation_fn):
         return nn.GELU()
     else:
         raise ValueError(f"Activation function {activation_fn} not supported")
+    
     
 def get_pooling(pooling, kernel_size=2):
     if pooling == 'max':
@@ -78,7 +80,7 @@ def get_xlstm(embedding_dim, xlstm_depth=1, dropout=0.2):
                 conv1d_kernel_size=3,
                 bias_init="powerlaw_blockdependent",
             ),
-            feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu"),
+            feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu", dropout=dropout),
         ),
         num_blocks=xlstm_depth,
         embedding_dim=embedding_dim,

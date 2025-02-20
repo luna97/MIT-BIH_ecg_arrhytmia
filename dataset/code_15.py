@@ -3,8 +3,8 @@ import torch
 import numpy as np
 import wfdb
 import os
+import pandas as pd
 from dataset.helper_code_code15 import find_records, load_label, load_signals
-from neurokit2 import signal_resample
 
 class ECGCODE15Dataset(Dataset):
     def __init__(self, data_folder, normalize=True, num_leads=1, random_shift=False, patch_size=64):
@@ -19,6 +19,16 @@ class ECGCODE15Dataset(Dataset):
         self.num_leads = num_leads
         self.random_shift = random_shift
         self.patch_size = patch_size
+        self.load_tabular_data()
+
+
+    def load_tabular_data(self):
+        # get the csv file with the tabular data
+        self.tab_data = pd.read_csv(self.data_folder + '/exams.csv')
+        # set exam_id as index
+        self.tab_data.set_index('exam_id', inplace=True)
+        # remove trace_file, patient_id and nn_predicted_age
+        self.tab_data.drop(columns=['trace_file', 'patient_id', 'nn_predicted_age', 'death', 'timey'], inplace=True)
 
     def __len__(self):
         return len(self.records)
@@ -46,9 +56,14 @@ class ECGCODE15Dataset(Dataset):
         if self.normalize:
             if signal.std(axis=0) != 0:
                 signal = (signal - signal.mean(axis=0)) / signal.std(axis=0)
+
+        tab_data = self.tab_data.loc[int(record)]
+        # to dataframe
+        tab_data = pd.DataFrame(tab_data)
             
         return {
             'signal': signal,
+            'tab_data': tab_data
         }
     
     def split_validation_training(self, val_size_pct = 0.1):
@@ -75,8 +90,12 @@ def collate_fn(batch):
         
     padded_masks = torch.nn.utils.rnn.pad_sequence(masks, batch_first=True)
 
+    tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
+    # print('tab_data type code15', type(tab_data))
+
     return {
         'signal': padded_signals,
         'mask': padded_masks,
+        'tab_data': tab_data
     }
 

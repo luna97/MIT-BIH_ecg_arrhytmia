@@ -5,14 +5,14 @@ from lightning.pytorch.loggers import WandbLogger
 from models.xLSTM import myxLSTM
 import dataset.mit_bih as mit_bih
 import dataset.code_15 as code_15
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from trainer import PretrainedxLSTMNetwork
 
 # argparse
 import argparse
 parser = argparse.ArgumentParser(description='Train a model')
-parser.add_argument('--lr', type=float, default=0.0008, help='Learning rate')
-parser.add_argument('--wd', type=float, default=0.0006, help='Weight decay')
+parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')
+parser.add_argument('--wd', type=float, default=0.0001, help='Weight decay')
 parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
 parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
 parser.add_argument('--patch_size', type=int, default=64, help='Patch size')
@@ -20,7 +20,7 @@ parser.add_argument('--dropout', type=float, default=0.3, help='Dropout')
 parser.add_argument('--embedding_size', type=int, default=64, help='Embedding size')
 parser.add_argument('--optimizer', type=str, default='adamw', help='Optimizer')
 parser.add_argument('--activation_fn', type=str, default='leakyrelu', help='Activation function')
-parser.add_argument('--xLSTM_depth', type=int, default=3, help='xLSTM depth')
+parser.add_argument('--xlstm_depth', type=int, default=3, help='xLSTM depth')
 parser.add_argument('--wandb_log', action='store_true', help='Log to wandb')
 parser.add_argument('--normalize', action='store_true', help='Normalize the data')
 parser.add_argument('--oversample', action='store_true', help='Oversample the data for the training set')
@@ -31,6 +31,9 @@ parser.add_argument('--num_workers', type=int, default=4, help='Number of worker
 parser.add_argument('--nk_clean', action='store_true', help='Use nk_clean for the code15 dataset')
 parser.add_argument('--use_scheduler', action='store_true', help='Use the scheduler for the optimizer')
 parser.add_argument('--data_folder_code15', type=str, default='/media/Volume/data/CODE15/unlabeled_records_360', help='Data folder for code15 dataset')
+parser.add_argument('--patch_embedding', type=str, default='linear', help='Patch embedding type')
+parser.add_argument('--multi_token_prediction', action='store_true', help='Multi token prediction')
+parser.add_argument('--loss_type', type=str, default='mse', help='Loss type')
 
 
 def pretrain(config, run=None, wandb=False):
@@ -55,17 +58,19 @@ def pretrain(config, run=None, wandb=False):
     test_dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='test', num_leads=1, oversample=False, random_shift=False, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
     test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
     
-    xlstm = myxLSTM(patch_size=config.patch_size, dropout=config.dropout, embedding_dim=config.embedding_size, activation_fn=config.activation_fn, xlstm_depth=config.xLSTM_depth)
-    model = PretrainedxLSTMNetwork(model=xlstm, lr=config.lr,optimizer=config.optimizer, batch_size=config.batch_size, wd=config.wd, use_scheduler=config.use_scheduler, patch_size=config.patch_size)
+    xlstm = myxLSTM(num_classes=5, patch_size=config.patch_size, dropout=config.dropout, multi_token_prediction=config.multi_token_prediction, activation_fn=config.activation_fn, embedding_size=config.embedding_size, xlstm_depth=config.xlstm_depth)
+    model = PretrainedxLSTMNetwork(model=xlstm, config=config)
         
     checkpoint_callback = ModelCheckpoint(monitor='val_loss')
-    # early_stopping = EarlyStopping(monitor='val_loss', patience=3)
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+
+    # early_stopping = EarlyStopping(monitor='val_loss', patience=10)
 
     if wandb:
         wand_logger = WandbLogger(log_model="all", project="pretrain-xLSTM", experiment=run)
-        trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[checkpoint_callback]) # , early_stopping])
+        trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[checkpoint_callback, lr_monitor], gradient_clip_val=0.5) # , early_stopping])
     else:
-        trainer = L.Trainer(max_epochs=config.epochs, callbacks=[checkpoint_callback]) #, early_stopping])
+        trainer = L.Trainer(max_epochs=config.epochs, callbacks=[checkpoint_callback, lr_monitor], gradient_clip_val=0.5) #, early_stopping])
 
     trainer.fit(model=model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
     trainer.test(model=model, dataloaders=test_dataloader)

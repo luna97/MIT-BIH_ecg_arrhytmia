@@ -23,16 +23,17 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         
         # get all the different values for column patient
         self.patients = self.samples['patient'].unique()
+        self.comments = {}
 
         # load on memory all the signals
         self.signals = {}
         for patient in self.patients:
             signal, _ = wfdb.rdsamp(os.path.join(data_folder, 'raw', f'{patient}'))
+            header = wfdb.rdheader(os.path.join(data_folder, 'raw', f'{patient}'))
             # normalize the signal
-            if normalize:
-                signal = (signal - signal.mean(axis=0)) / signal.std(axis=0)
-
             self.signals[patient] = signal
+            self.comments[patient] = header.comments
+
 
     def __len__(self):
         return len(self.samples)
@@ -47,7 +48,8 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         sample = self.samples.iloc[idx]
         patient = sample['patient']
-        heartbeat_signal = self.signals[patient][sample['hb_start']:sample['hb_end'], :self.num_leads]
+        signal = self.signals[patient]
+        heartbeat_signal = signal[sample['hb_start']:sample['hb_end'], :self.num_leads]
 
         if self.random_shift:
             window_start = sample['win_start']
@@ -57,16 +59,13 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             window_end += shift
             # ensure that the window is inside the signal
             window_start = max(0, window_start)
-            window_end = min(window_end, len(self.signals[patient]))
-            window_signal = self.signals[patient][window_start:window_end, :self.num_leads]
+            window_end = min(window_end, len(signal))
+            window_signal = signal[window_start:window_end, :self.num_leads]
         else:
-            window_signal = self.signals[patient][sample['win_start']:sample['win_end'], :self.num_leads]
+            window_signal = signal[sample['win_start']:sample['win_end'], :self.num_leads]
 
         if window_signal.shape[0] == 0:
             print(f'index {idx}, patient {patient}, window_signal shape {window_signal.shape}, heartbeat_signal shape {heartbeat_signal.shape}')
-
-        if self.nkclean:
-            window_signal = nk.ecg_clean(window_signal[:, 0], sampling_rate=360, method='neurokit').copy()
 
         if self.normalize:
             if window_signal.std(axis=0) != 0:
@@ -74,10 +73,27 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             if heartbeat_signal.std(axis=0) != 0:
                 heartbeat_signal = (heartbeat_signal - heartbeat_signal.mean(axis=0)) / heartbeat_signal.std(axis=0)
 
+        if self.nkclean:
+            window_signal[:, 0] = nk.ecg_clean(window_signal[:, 0], sampling_rate=360)
+            heartbeat_signal[:, 0] = nk.ecg_clean(heartbeat_signal[:, 0], sampling_rate=360)
+
+        comment = self.comments[int(patient)][0].split(' ')
+        age = min(0, int(comment[0]))
+        is_male = comment[1] == 'M'
+
+        # create pandas row with the tabular data
+        tab_data = pd.DataFrame({
+            'age': [age],
+            'is_male': [is_male],
+            'RBBB': sample['orig_label'] == 'R',
+            'LBBB': sample['orig_label'] == 'L',
+        })
+
         return {
             'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),
             'signal': torch.tensor(window_signal, dtype=torch.float32),
-            'label': self.get_label_int(sample['label'])
+            'label': self.get_label_int(sample['label']),
+            'tab_data': tab_data
         }
     
     def split_validation_training(self, val_size=0.2):
@@ -110,10 +126,14 @@ def collate_fn(batch):
     mask_signals = torch.nn.utils.rnn.pad_sequence(mask_signals, batch_first=True)
     mask_hb = torch.nn.utils.rnn.pad_sequence(mask_hb, batch_first=True)
     # print('signals shape', window_signals.shape)
+    tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
+    # print('tab_data type mitbih', type(tab_data))
+
     return {
         'heartbeat': heartbeat_signals,
         'mask_hb': mask_hb,
         'signal': window_signals,
         'mask': mask_signals,
-        'label': labels
+        'label': labels,
+        'tab_data': tab_data
     }

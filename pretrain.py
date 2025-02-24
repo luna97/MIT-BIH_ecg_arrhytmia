@@ -7,6 +7,8 @@ import dataset.mit_bih as mit_bih
 import dataset.code_15 as code_15
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from trainer import PretrainedxLSTMNetwork
+import sys
+
 
 # argparse
 import argparse
@@ -34,9 +36,15 @@ parser.add_argument('--data_folder_code15', type=str, default='/media/Volume/dat
 parser.add_argument('--patch_embedding', type=str, default='linear', help='Patch embedding type')
 parser.add_argument('--multi_token_prediction', action='store_true', help='Multi token prediction')
 parser.add_argument('--loss_type', type=str, default='mse', help='Loss type')
-
+parser.add_argument('--num_epochs_warmup',  type=int, default=1, help='Number of warmup epoch for the scheduler')
+parser.add_argument('--num_epochs_warm_restart',  type=int, default=5, help='Number of epoch before restarting the scheduler')
+parser.add_argument('--deterministic', action='store_true', help='Deterministic training')
+parser.add_argument('--is_sweep', action='store_true', help='Is a sweep')
 
 def pretrain(config, run=None, wandb=False):
+
+    if config.deterministic:
+        L.seed_everything(42)
 
     if not config.pretrain_with_code15:
         dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='train', num_leads=1, oversample=config.oversample, random_shift=config.random_shift, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
@@ -55,22 +63,25 @@ def pretrain(config, run=None, wandb=False):
         train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=code_15.collate_fn)
         val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn)
 
+    len_train_dataset = len(train_dataset)
     test_dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='test', num_leads=1, oversample=False, random_shift=False, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
     test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
     
+    
     xlstm = myxLSTM(num_classes=5, patch_size=config.patch_size, dropout=config.dropout, multi_token_prediction=config.multi_token_prediction, activation_fn=config.activation_fn, embedding_size=config.embedding_size, xlstm_depth=config.xlstm_depth)
-    model = PretrainedxLSTMNetwork(model=xlstm, config=config)
+    model = PretrainedxLSTMNetwork(model=xlstm, len_train_dataset=len_train_dataset, config=config)
         
-    checkpoint_callback = ModelCheckpoint(monitor='val_loss')
+
+    checkpoint_callback = ModelCheckpoint(monitor='val_nrmse')
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    # early_stopping = EarlyStopping(monitor='val_loss', patience=10)
+    # early_stopping = EarlyStopping(monitor='val_nrmse', patience=10)
 
     if wandb:
-        wand_logger = WandbLogger(log_model="all", project="pretrain-xLSTM", experiment=run)
-        trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[checkpoint_callback, lr_monitor], gradient_clip_val=0.5) # , early_stopping])
+        wand_logger = WandbLogger(project="pretrain-xLSTM", experiment=run)
+        trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[checkpoint_callback, lr_monitor], gradient_clip_val=0.5)
     else:
-        trainer = L.Trainer(max_epochs=config.epochs, callbacks=[checkpoint_callback, lr_monitor], gradient_clip_val=0.5) #, early_stopping])
+        trainer = L.Trainer(max_epochs=config.epochs, callbacks=[checkpoint_callback, lr_monitor], gradient_clip_val=0.5)
 
     trainer.fit(model=model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
     trainer.test(model=model, dataloaders=test_dataloader)

@@ -24,7 +24,7 @@ class ECGCODE15Dataset(Dataset):
 
     def load_tabular_data(self):
         # get the csv file with the tabular data
-        self.tab_data = pd.read_csv(self.data_folder + '/exams.csv')
+        self.tab_data = pd.read_csv(self.data_folder + '/../exams.csv')
         # set exam_id as index
         self.tab_data.set_index('exam_id', inplace=True)
         # remove trace_file, patient_id and nn_predicted_age

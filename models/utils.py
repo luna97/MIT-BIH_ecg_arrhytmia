@@ -3,7 +3,6 @@ import numpy as np
 import random
 from torch import nn
 from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLayerConfig, sLSTMBlockConfig, xLSTMBlockStackConfig, xLSTMBlockStack
-from models.PatchEmbedding import PatchEmbedding
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':
@@ -86,7 +85,8 @@ def get_xlstm(embedding_dim, xlstm_depth=1, dropout=0.2):
         embedding_dim=embedding_dim,
         dropout=dropout,
         context_length=500,
-        slstm_at=[0] if xlstm_depth == 1 else [1],
+        # one at each 7 
+        slstm_at=[i for i in range(0, xlstm_depth, 7)],
     )
 
     return xLSTMBlockStack(cfg)

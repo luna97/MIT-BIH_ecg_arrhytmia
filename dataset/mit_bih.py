@@ -119,8 +119,10 @@ def collate_fn(batch):
     hb = [item['heartbeat'] for item in batch]
     mask_signals = [torch.ones_like(item['signal'], dtype=torch.bool) for item in batch]
     mask_hb = [torch.ones_like(item['heartbeat'], dtype=torch.bool) for item in batch]
-    # print('signals shape', [s.shape for s in hb])
+
+    # pad to same length and pad to match the patch size module
     heartbeat_signals = torch.nn.utils.rnn.pad_sequence(hb, batch_first=True)
+
     window_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
     labels = torch.tensor([item['label'] for item in batch])
     mask_signals = torch.nn.utils.rnn.pad_sequence(mask_signals, batch_first=True)

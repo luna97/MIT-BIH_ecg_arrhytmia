@@ -6,7 +6,12 @@ from tqdm import tqdm
 import numpy as np
 import wfdb
 from joblib import Parallel, delayed
-from neurokit2 import ecg_clean  
+from neurokit2 import ecg_clean 
+
+# sudo rm -rf  /media/Volume/data/CODE15/unlabeled_records_360/
+# sudo mkdir  /media/Volume/data/CODE15/unlabeled_records_360/
+# sudo chmod 777  /media/Volume/data/CODE15/unlabeled_records_360/
+# python resample_code15_dataset.py -o /media/Volume/data/CODE15/unlabeled_records_360_nkclean/ --leads II -_nk_clean
 
 parser = argparse.ArgumentParser(description='Prepare the CODE-15 database.')
 parser.add_argument('-df','--data_folder', type=str, required=False, default='/media/Volume/data/CODE15/')
@@ -34,15 +39,27 @@ def resample_signal(record, folder, output_path, leads, nk_clean):
     resampled = []
     for l in leads:  # Use actual number of leads
         i = lead_names.index(l)
+        # skipping zero only records
         if np.all(signal[:, i] == 0):
             print(f"Record {record} has zeros only for lead {l} and length {signal.shape[0]} - skipping")
             return
+        # skip short records
         if len(signal[:, i]) < 128:
             print(f"Record {record} has less than 128 samples for lead {l} - skipping")
             return
-        # if a sample has nan, skip
+        # skip nan records
         if np.isnan(signal[:,i]).any():
             print(f"Record {record} has nan for lead {l} - skipping")
+            return
+        
+        # skip record with too big variance and high values
+        if np.var(signal[:, i]) > 10 and (np.max(signal[:, i]) >= 15 or np.min(signal[:, i]) < -15):
+            print(f"Record {record} has too high variance and high values for lead {l} - skipping")
+            return
+        
+        # skip record with too small variance 
+        if np.var(signal[:, i]) < 0.0001:
+            print(f"Record {record} has too low variance for lead {l} - skipping")
             return
 
     # now i can resample if is everything is okay
@@ -88,7 +105,7 @@ def resample_signal(record, folder, output_path, leads, nk_clean):
 
 def normalize_code15_dataset(folder, output_path, leads, nk_clean):
     # delete everything in the out dir
-    os.system(f'rm -rf {output_path}/*')
+    # os.system(f'rm -rf {output_path.rstrip('/')}/*')
     # mkdir out folder
     os.makedirs(output_path, exist_ok=True)
     records = find_records(folder + 'unlabeled_records')

@@ -9,18 +9,26 @@ class PatchEmbedding(nn.Module):
 
         self.conv = nn.LazyConv1d(num_hiddens, kernel_size=patch_size, stride=patch_size)
 
-    def forward(self, X):
+    def forward(self, x):
         # print('X shape', X.shape)
         # Output shape: (batch size, no. of patches, no. of channels)
-        return self.conv(X).flatten(2).transpose(1, 2)
+        return self.conv(x).flatten(2).transpose(1, 2)
+    
+class SeriesDecomposition(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
+    def forward(self, x):
+        x_t = nn.functional.avg_pool1d
 
 class FeatureSpec(object):
     def __init__(self, name, num_categories, dtype):
         self.name = name
         self.num_categories = num_categories
         self.dtype = dtype
+        torch.fft
  
+
 class TabularEmbeddings(nn.Module):
     def __init__(self, feature_specs, num_hiddens=256, dropout=0.1):
         """

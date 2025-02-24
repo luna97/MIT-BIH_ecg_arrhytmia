@@ -3,14 +3,21 @@ import lightning as L
 import torchmetrics
 import torchmetrics.classification
 from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss
-import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.nn import functional as F
+from plot_utils import plot_reconstruction, plot_generation
+import numpy as np
+from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
+import torch
+import lightning
+import sys
 
 # define the LightningModule
 class PretrainedxLSTMNetwork(L.LightningModule):
     def __init__(
             self, 
             model, 
+            len_train_dataset,
             config
         ):
         super().__init__()
@@ -24,8 +31,12 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         self.multi_token_prediction = config.multi_token_prediction
         self.epochs = config.epochs
         self.loss_type = config.loss_type
-        self.config = config
-        self.save_hyperparameters()
+        # self.config = config
+        self.len_train_dataset = len_train_dataset
+        self.num_epochs_warmup = config.num_epochs_warmup
+        self.num_epochs_warm_restart = config.num_epochs_warm_restart
+        if not config.is_sweep:
+            self.save_hyperparameters()
 
     def training_step(self, batch, _):
         loss = self.reconstruct_batch(batch, step='train')
@@ -34,14 +45,42 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         return loss
     
     def validation_step(self, batch, _):
-        loss = self.reconstruct_batch(batch)
+        loss = self.reconstruct_batch(batch, step='val')
         self.log("val_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
         return loss
     
     def test_step(self, batch, _):
-        loss = self.reconstruct_batch(batch)
-        self.log("test_mse", mse.item(), prog_bar=True, batch_size=self.batch_size)
+        loss = self.reconstruct_batch(batch, step='test')
+        self.log("test_mse", loss.item(), prog_bar=True, batch_size=self.batch_size)
         return loss
+
+    def on_validation_epoch_end(self):
+        """
+        When the validation loop ends, some representative plots from different classes are saved on wandb
+        """
+        # save the plots of the reconstruction for some samples
+        sample_s = self.trainer.val_dataloaders.dataset[420]
+        sample_v = self.trainer.val_dataloaders.dataset[1967]
+        sample_t = self.trainer.val_dataloaders.dataset[4362]
+        sample_n = self.trainer.val_dataloaders.dataset[0]
+
+        log_dir = self.logger.log_dir if self.logger.log_dir is not None else self.logger.experiment.dir
+
+        img_s = plot_reconstruction(sample_s, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_s')
+        img_v = plot_reconstruction(sample_v, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_v')
+        img_t = plot_reconstruction(sample_t, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_t')
+        img_n = plot_reconstruction(sample_n, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_n')
+        if isinstance(self.logger, lightning.pytorch.loggers.WandbLogger):
+            self.logger.log_image(key="reconstructions", images=[img_s, img_v, img_t, img_n])
+
+        img_s = plot_generation(sample_s, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_s')
+        img_v = plot_generation(sample_v, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_v')
+        img_t = plot_generation(sample_t, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_t')
+        img_n = plot_generation(sample_n, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_n')
+        if isinstance(self.logger, lightning.pytorch.loggers.WandbLogger):
+            self.logger.log_image(key="generations", images=[img_s, img_v, img_t, img_n])
+
+        return super().on_validation_epoch_end()
 
     
     def reconstruct_batch(self, batch, step):
@@ -49,72 +88,62 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         mask = batch["mask"]
         tab_data = batch["tab_data"]
 
-        if not self.multi_token_prediction:
+        x = F.pad(x, (0, 0, 0, self.patch_size - x.shape[1] % self.patch_size))
+        mask = F.pad(mask, (0, 0, 0, self.patch_size - mask.shape[1] % self.patch_size))
 
-            reconstruct = self.model.reconstruct(x, tab_data)
+        reconstruction = self.model.reconstruct(x, tab_data)
 
-            # get rid of the exeding part on the original signal
-            shift_x = x[:, :reconstruct.shape[1]]
-            shift_x = shift_x[:, self.patch_size:].squeeze()
-
-            mask_shifted = mask[:, :reconstruct.shape[1]]
-            mask_shifted = mask_shifted[:, self.patch_size:].squeeze()
-
-            shift_reconstruct = reconstruct[:, :-self.patch_size]
-
-            # calculate the loss
-            mae = masked_mae_loss(shift_reconstruct, shift_x, mask=mask_shifted)
-            mse = masked_mse_loss(shift_reconstruct, shift_x, mask=mask_shifted)
-            grad_loss = gradient_loss(shift_reconstruct, shift_x, mask=mask_shifted)
-
+        if self.multi_token_prediction:
+            # tokens as array from uple
+            tokens = [r1, r2, r3, r4] = reconstruction
         else:
-            r1, r2, r3, r4 = self.model.reconstruct(x, tab_data)
-            # get rid of exeding part on the original signal
-            shift_x = x[:, :r1.shape[1]]
+            tokens = [r]
 
-            shift_x1 = shift_x[:, self.patch_size:].squeeze()
-            shift_x2 = shift_x[:, self.patch_size * 2:].squeeze()
-            shift_x3 = shift_x[:, self.patch_size * 3:].squeeze()
-            shift_x4 = shift_x[:, self.patch_size * 4:].squeeze()
+        maes, mses, grads = [], [], []
+        nrmse = np.inf
 
-            mask_shifted = mask[:, :r1.shape[1]]
-            mask_shifted1 = mask_shifted[:, self.patch_size:].squeeze()
-            mask_shifted2 = mask_shifted[:, self.patch_size * 2:].squeeze()
-            mask_shifted3 = mask_shifted[:, self.patch_size * 3:].squeeze()
-            mask_shifted4 = mask_shifted[:, self.patch_size * 4:].squeeze()
+        for i, r in enumerate(tokens, start=1):
+            shift_x = x[:, self.patch_size * i:].squeeze()
+            mask_shifted = mask[:, self.patch_size * i:].squeeze()
+            shift_reconstruct = r[:, :-self.patch_size * i]
 
-            shift_reconstruct1 = r1[:, :-self.patch_size]
-            shift_reconstruct2 = r2[:, :-self.patch_size * 2]
-            shift_reconstruct3 = r3[:, :-self.patch_size * 3]
-            shift_reconstruct4 = r4[:, :-self.patch_size * 4]
+            # compute the loss and use the gradients only when it is needed
+            if self.loss_type == 'mae':
+                maes.append(masked_mae_loss(shift_reconstruct, shift_x, mask=mask_shifted))
+            else:
+                with torch.no_grad(): maes.append(masked_mae_loss(shift_reconstruct, shift_x, mask=mask_shifted))
 
-            mae1 = masked_mae_loss(shift_reconstruct1, shift_x1, mask=mask_shifted1)
-            mae2 = masked_mae_loss(shift_reconstruct2, shift_x2, mask=mask_shifted2)
-            mae3 = masked_mae_loss(shift_reconstruct3, shift_x3, mask=mask_shifted3)
-            mae4 = masked_mae_loss(shift_reconstruct4, shift_x4, mask=mask_shifted4)
-            mae = (mae1 + mae2 + mae3 + mae4) / 4
+            if self.loss_type == 'grad':
+                grads.append(gradient_loss(shift_reconstruct, shift_x, mask=mask_shifted))
+            else:
+                with torch.no_grad(): grads.append(gradient_loss(shift_reconstruct, shift_x, mask=mask_shifted))
+            
+            if self.loss_type == 'mse' or self.loss_type == 'grad':
+                mse = masked_mse_loss(shift_reconstruct, shift_x, mask=mask_shifted, reduction='None')
+            else:
+                with torch.no_grad(): mse = masked_mse_loss(shift_reconstruct, shift_x, mask=mask_shifted, reduction='None')
+            
+            mses.append(mse.mean())
 
-            mse1 = masked_mse_loss(shift_reconstruct1, shift_x1, mask=mask_shifted1)
-            mse2 = masked_mse_loss(shift_reconstruct2, shift_x2, mask=mask_shifted2)
-            mse3 = masked_mse_loss(shift_reconstruct3, shift_x3, mask=mask_shifted3)
-            mse4 = masked_mse_loss(shift_reconstruct4, shift_x4, mask=mask_shifted4)
-            mse = (mse1 + mse2 + mse3 + mse4) / 4
+            if i == 1:
+            # calculate the normalized root squared error only for the first token prediction
+                with torch.no_grad():
+                    nrmse = torch.sqrt(mse.mean(dim=0)) / (shift_x.max() - shift_x.min())
 
-            grad_loss1 = gradient_loss(shift_reconstruct1, shift_x1, mask=mask_shifted1)
-            grad_loss2 = gradient_loss(shift_reconstruct2, shift_x2, mask=mask_shifted2)
-            grad_loss3 = gradient_loss(shift_reconstruct3, shift_x3, mask=mask_shifted3)
-            grad_loss4 = gradient_loss(shift_reconstruct4, shift_x4, mask=mask_shifted4)
-            grad_loss = (grad_loss1 + grad_loss2 + grad_loss3 + grad_loss4) / 4
+        mae = sum(maes) / len(maes)
+        mse = sum(mses) / len(mses)
+        grad = sum(grads) / len(grads)
 
 
         self.log(f"{step}_mse", mse.item(), prog_bar=True, batch_size=self.batch_size)
         self.log(f"{step}_mae", mae.item(), prog_bar=True, batch_size=self.batch_size)
-        self.log(f"{step}_grad", grad_loss.item(), prog_bar=True, batch_size=self.batch_size)
-
+        self.log(f"{step}_grad", grad.item(), prog_bar=True, batch_size=self.batch_size)
+        self.log(f"{step}_nrmse", nrmse.mean().item(), prog_bar=True, batch_size=self.batch_size)
+        
         if self.loss_type == 'mae':
             return mae
         elif self.loss_type == 'grad':
-            return grad_loss + mse 
+            return grad + mse 
         else:
             return mse
 
@@ -127,12 +156,18 @@ class PretrainedxLSTMNetwork(L.LightningModule):
             optimizer = optim.SGD(self.parameters(), lr=self.lr, weight_decay=self.wd)
 
         if self.use_scheduler:
-            sched = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+            steps_per_epoch = np.ceil(self.len_train_dataset / self.batch_size)
+            num_training_steps = steps_per_epoch * self.epochs
+            sched = get_cosine_with_hard_restarts_schedule_with_warmup(
+                optimizer, 
+                num_warmup_steps=steps_per_epoch * self.num_epochs_warmup, 
+                num_training_steps=num_training_steps, 
+                num_cycles=(num_training_steps // steps_per_epoch) // self.num_epochs_warm_restart)
+
             scheduler = {
                 'scheduler': sched,
-                'interval': 'epoch', # or 'step' 
+                'interval': 'step', # or 'epoch' 
                 'frequency': 1,
-                'monitor': 'val_loss',
             }
             return [optimizer], [scheduler]
         else:

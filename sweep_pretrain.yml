@@ -8,23 +8,25 @@ parameters:
   pretrain:
     value: True
   lr:
-    value: 0.001
+    min: 0.00001
+    max: 0.001
   wd:
-    value: 0.0001
+    min: 0.0001
+    max: 0.1
   batch_size:
     value: 128
   epochs:
-    value: 50
+    value: 20
   optimizer:
     value: "adamw"
   patch_size:
-    value: 64
+    values: [128, 256]
   embedding_size:
-    values: [128, 256, 512]
+    values: [784, 512, 256]
   activation_fn:
     value: 'relu'
-  xLSTM_depth:
-    value: 5
+  xlstm_depth:
+    value: 7
   dropout:
     value: 0.3
   normalize:
@@ -40,8 +42,22 @@ parameters:
   num_workers:
     value: 4
   nk_clean:
-    value: False
+    value: True
   use_scheduler:
     value: True
   data_folder_code15:
-    value: '/media/Volume/data/CODE15/unlabeled_records_360'
+    value: '/media/Volume/data/CODE15/unlabeled_records_360_nkclean'
+  multi_token_prediction: 
+    value: True
+  loss_type:
+    values: ['grad', 'mse']
+  num_epochs_warmup:
+    value: 2
+  num_epochs_warm_restart:
+    value: 5
+  patch_embedding:
+    value: 'linear'
+  deterministic:
+    value: True
+  is_sweep:
+    value: True

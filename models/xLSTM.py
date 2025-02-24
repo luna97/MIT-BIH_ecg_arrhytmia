@@ -38,10 +38,10 @@ class myxLSTM(nn.Module):
         if not self.multi_token_prediction:
             self.reconstruction = HeadModule(embedding_size, patch_size)
         else:
-            self.rec1 = HeadModule(embedding_size, patch_size)
-            self.rec2 = HeadModule(embedding_size, patch_size)
-            self.rec3 = HeadModule(embedding_size, patch_size)
-            self.rec4 = HeadModule(embedding_size, patch_size)   
+            self.rec1 = HeadModule(embedding_size, patch_size, dropout)
+            self.rec2 = HeadModule(embedding_size, patch_size, dropout)
+            self.rec3 = HeadModule(embedding_size, patch_size, dropout)
+            self.rec4 = HeadModule(embedding_size, patch_size, dropout)
     
         self.tab_embeddings = TabularEmbeddings([
             FeatureSpec('age', 110, torch.int64),
@@ -49,7 +49,7 @@ class myxLSTM(nn.Module):
             FeatureSpec('RBBB', 2, torch.bool),
             FeatureSpec('LBBB', 2, torch.bool),
             # FeatureSpec('normal_ecg', 2, torch.bool),
-        ], num_hiddens=embedding_size, dropout=0.1)
+        ], num_hiddens=embedding_size, dropout=dropout)
 
 
     def reconstruct(self, x, tab_data):
@@ -57,13 +57,9 @@ class myxLSTM(nn.Module):
         tab_emb = self.tab_embeddings(tab_data, batch_size)
         _, num_embeddings, _ = tab_emb.shape
         x = x.permute(0, 2, 1) # put the channels in the middle
-        # print('x shape', x.shape)
         x = self.patch_embedding(x)
-        #print('x shape post patch_emb', x.shape)
-        #print('tab_emb shape', tab_emb.shape)
 
         x = torch.cat([tab_emb, x], dim=1)
-        #print('x shape post patch_emb', x.shape)
         x = self.xlstm(x)
 
         x = x[:, num_embeddings:, :]
@@ -99,11 +95,12 @@ class myxLSTM(nn.Module):
     
 
 class HeadModule(nn.Module):
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features, dropout=0.3):
         super(HeadModule, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(in_features, in_features // 2),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(in_features // 2, out_features),
         )
 

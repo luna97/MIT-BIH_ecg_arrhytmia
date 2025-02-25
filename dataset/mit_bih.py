@@ -78,16 +78,24 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             heartbeat_signal[:, 0] = nk.ecg_clean(heartbeat_signal[:, 0], sampling_rate=360)
 
         comment = self.comments[int(patient)][0].split(' ')
-        age = min(0, int(comment[0]))
+        age = max(0, int(comment[0]))
+
         is_male = comment[1] == 'M'
 
         # create pandas row with the tabular data
-        tab_data = pd.DataFrame({
-            'age': [age],
-            'is_male': [is_male],
-            'RBBB': sample['orig_label'] == 'R',
-            'LBBB': sample['orig_label'] == 'L',
-        })
+        if self.subset == 'train':
+            # rbb and lbb ony for the training set
+            tab_data = pd.DataFrame({
+                'age': [age],
+                'is_male': [is_male],
+                'RBBB': sample['orig_label'] == 'R',
+                'LBBB': sample['orig_label'] == 'L',
+            })
+        else:
+            tab_data = pd.DataFrame({
+                'age': [age],
+                'is_male': [is_male]
+            })
 
         return {
             'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),

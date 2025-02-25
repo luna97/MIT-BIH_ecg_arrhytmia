@@ -3,6 +3,7 @@ from torch import nn
 
 from models.utils import get_activation_fn, get_xlstm
 from models.PatchEmbedding import TabularEmbeddings, PatchEmbedding, FeatureSpec
+from models.SeriesDecomposition import SeriesDecomposition  
 
 class myxLSTM(nn.Module):
 
@@ -14,12 +15,17 @@ class myxLSTM(nn.Module):
             multi_token_prediction=True,
             activation_fn='leakyrelu',
             embedding_size=1024,
-            xlstm_depth=8,
+            series_decomposition=0,
+            xlstm_config = ['m', 's', 'm', 'm', 'm', 'm', 'm']
         ): 
         super(myxLSTM, self).__init__()
         self.dropout = nn.Dropout(dropout)
         self.patch_size = patch_size
         self.multi_token_prediction = multi_token_prediction
+
+        self.series_decomposition = series_decomposition
+        if series_decomposition > 0:
+            self.sd = SeriesDecomposition(series_decomposition)
 
         self.activation = get_activation_fn(activation_fn)
 
@@ -27,7 +33,7 @@ class myxLSTM(nn.Module):
 
         self.sep_token = nn.Parameter(torch.randn(1, 1, embedding_size))
 
-        self.xlstm = get_xlstm(embedding_size, xlstm_depth, dropout=dropout)
+        self.xlstm = get_xlstm(embedding_size, dropout=dropout, blocks=xlstm_config)
 
         self.fc = nn.Sequential(
             nn.Linear(embedding_size, embedding_size // 2),
@@ -46,16 +52,28 @@ class myxLSTM(nn.Module):
         self.tab_embeddings = TabularEmbeddings([
             FeatureSpec('age', 110, torch.int64),
             FeatureSpec('is_male', 2, torch.bool),
-            FeatureSpec('RBBB', 2, torch.bool),
-            FeatureSpec('LBBB', 2, torch.bool),
+            # FeatureSpec('RBBB', 2, torch.bool),
+            # FeatureSpec('LBBB', 2, torch.bool),
             # FeatureSpec('normal_ecg', 2, torch.bool),
         ], num_hiddens=embedding_size, dropout=dropout)
 
 
     def reconstruct(self, x, tab_data):
+        # mean = x.mean(dim=1, keepdim=True)
+        # std = x.std(dim=1, keepdim=True)
+        # x = (x - mean) / std
+
         batch_size = x.shape[0]
         tab_emb = self.tab_embeddings(tab_data, batch_size)
         _, num_embeddings, _ = tab_emb.shape
+
+        if self.series_decomposition:
+            res, trend = self.sd(x)
+            # add channels 
+            x = torch.cat([x, res, trend], dim=-1)
+
+        # mean = mean.squeeze(1)
+        # std = std.squeeze(1)
         x = x.permute(0, 2, 1) # put the channels in the middle
         x = self.patch_embedding(x)
 
@@ -76,6 +94,9 @@ class myxLSTM(nn.Module):
     
 
     def forward(self, ctx, x, tab_data):
+        if self.series_decomposition:
+            x = self.sd(x)
+
         x = x.permute(0, 2, 1) # put the channels in the middle
         ctx = ctx.permute(0, 2, 1) # put the channels in the middle
         ctx = self.patch_embedding(ctx)

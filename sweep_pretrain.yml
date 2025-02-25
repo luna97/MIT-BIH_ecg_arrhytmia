@@ -3,34 +3,30 @@ method: random
 name: pretrain-xLSTM
 metric:
   goal: minimize
-  name: test_loss
+  name: test_nrmse
 parameters:
   pretrain:
     value: True
   lr:
-    min: 0.00001
-    max: 0.001
+    value: 0.0003
   wd:
-    min: 0.0001
-    max: 0.1
+    values: [0.1, 0.001, 0.00001, 0.]
   batch_size:
-    value: 128
+    value: 256
   epochs:
-    value: 20
+    value: 25
   optimizer:
     value: "adamw"
   patch_size:
     values: [128, 256]
   embedding_size:
-    values: [784, 512, 256]
+    value: 512
   activation_fn:
-    value: 'relu'
+    values: ['relu', 'leaky_relu', 'gelu']
   xlstm_depth:
     value: 7
   dropout:
     value: 0.3
-  normalize:
-    value: True
   wandb_log:
     value: True
   random_shift:
@@ -40,17 +36,13 @@ parameters:
   pretrain_with_code15:
     value: True
   num_workers:
-    value: 4
-  nk_clean:
-    value: True
+    value: 8
   use_scheduler:
     value: True
-  data_folder_code15:
-    value: '/media/Volume/data/CODE15/unlabeled_records_360_nkclean'
   multi_token_prediction: 
     value: True
   loss_type:
-    values: ['grad', 'mse']
+    value: 'grad'
   num_epochs_warmup:
     value: 2
   num_epochs_warm_restart:
@@ -61,3 +53,20 @@ parameters:
     value: True
   is_sweep:
     value: True
+  grad_clip:
+    value: 5
+  series_decomposition:
+    value: 0
+  patience:
+    value: 10
+  nk_clean:
+    value: False
+  data_folder_code15:
+    value: '/media/Volume/data/CODE15/unlabeled_records_360'
+  normalize:
+    value: True
+  xlstm_config:
+    value: ['m', 's', 'm']
+  sched_decay_factor:
+    value: 0.8
+  

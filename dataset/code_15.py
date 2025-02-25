@@ -29,6 +29,7 @@ class ECGCODE15Dataset(Dataset):
         self.tab_data.set_index('exam_id', inplace=True)
         # remove trace_file, patient_id and nn_predicted_age
         self.tab_data.drop(columns=['trace_file', 'patient_id', 'nn_predicted_age', 'death', 'timey'], inplace=True)
+        print("tabular data fields for CODE 15: ", self.tab_data.columns)
 
     def __len__(self):
         return len(self.records)
@@ -54,8 +55,9 @@ class ECGCODE15Dataset(Dataset):
 
         # normalize the signal by subtracting the mean and dividing by the standard deviation
         if self.normalize:
-            if signal.std(axis=0) != 0:
-                signal = (signal - signal.mean(axis=0)) / signal.std(axis=0)
+            std = signal.std(axis=0)
+            if std != 0:
+                signal = (signal - signal.mean(axis=0)) / std
 
         tab_data = self.tab_data.loc[int(record)]
         # to dataframe

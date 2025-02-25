@@ -3,11 +3,12 @@ import numpy as np
 import random
 from torch import nn
 from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLayerConfig, sLSTMBlockConfig, xLSTMBlockStackConfig, xLSTMBlockStack
+from models.SeriesDecomposition import SeriesDecomposition
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':
         return nn.ReLU()
-    elif activation_fn == 'leakyrelu':
+    elif activation_fn == 'leakyrelu' or activation_fn == 'leaky_relu':
         return nn.LeakyReLU()
     elif activation_fn == 'gelu':
         return nn.GELU()
@@ -63,30 +64,18 @@ def get_mLSTM(embedding_dim, dropout=0.2):
     return xLSTMBlockStack(cfg)
 
 
-def get_xlstm(embedding_dim, xlstm_depth=1, dropout=0.2):
-    cfg = xLSTMBlockStackConfig(
-        mlstm_block=mLSTMBlockConfig(
-            mlstm=mLSTMLayerConfig(
-                conv1d_kernel_size=3, 
-                qkv_proj_blocksize=4, 
-                num_heads=4,
-            )
-        ),
-        slstm_block=sLSTMBlockConfig(
-            slstm=sLSTMLayerConfig(
-                backend="cuda",
-                num_heads=4,
-                conv1d_kernel_size=3,
-                bias_init="powerlaw_blockdependent",
-            ),
-            feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu", dropout=dropout),
-        ),
-        num_blocks=xlstm_depth,
-        embedding_dim=embedding_dim,
-        dropout=dropout,
-        context_length=500,
-        # one at each 7 
-        slstm_at=[i for i in range(0, xlstm_depth, 7)],
-    )
-
-    return xLSTMBlockStack(cfg)
+def get_xlstm(
+        embedding_dim, 
+        dropout=0.2, 
+        blocks=['m', 's', 'm', 'm', 'm', 'm', 'm']
+    ):
+    xlstm = nn.ModuleList()
+    for block in blocks:
+        if block == 'm':
+            xlstm.append(get_mLSTM(embedding_dim, dropout)) 
+        elif block == 's':
+            xlstm.append(get_sLSTM(embedding_dim, dropout))
+        else:
+            raise ValueError(f"Block {block} not supported")
+        
+    return nn.Sequential(*xlstm)

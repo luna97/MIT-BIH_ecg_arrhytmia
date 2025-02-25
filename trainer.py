@@ -11,6 +11,9 @@ from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
 import torch
 import lightning
 import sys
+import math
+from torch.optim.lr_scheduler import LambdaLR
+from schedulers import get_cosine_with_hard_restarts_schedule_with_warmup_and_decay
 
 # define the LightningModule
 class PretrainedxLSTMNetwork(L.LightningModule):
@@ -35,6 +38,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         self.len_train_dataset = len_train_dataset
         self.num_epochs_warmup = config.num_epochs_warmup
         self.num_epochs_warm_restart = config.num_epochs_warm_restart
+        self.sched_decay_factor = config.sched_decay_factor
         if not config.is_sweep:
             self.save_hyperparameters()
 
@@ -152,17 +156,27 @@ class PretrainedxLSTMNetwork(L.LightningModule):
             optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.wd)
         elif self.optimizer == 'adamw':
             optimizer = optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.wd)
+        elif self.optimizer == 'adafactor':
+            optimizer = optim.Adafactor(self.parameters(), lr=self.lr, weight_decay=self.wd)
         else:
             optimizer = optim.SGD(self.parameters(), lr=self.lr, weight_decay=self.wd)
 
         if self.use_scheduler:
             steps_per_epoch = np.ceil(self.len_train_dataset / self.batch_size)
             num_training_steps = steps_per_epoch * self.epochs
-            sched = get_cosine_with_hard_restarts_schedule_with_warmup(
+            warmup_steps = steps_per_epoch * self.num_epochs_warmup
+            # sched = get_cosine_with_hard_restarts_schedule_with_warmup(
+            #    optimizer, 
+            #    num_warmup_steps=steps_per_epoch * self.num_epochs_warmup, 
+            #    num_training_steps=num_training_steps, 
+            #    num_cycles=(num_training_steps // steps_per_epoch) // self.num_epochs_warm_restart)
+            sched = get_cosine_with_hard_restarts_schedule_with_warmup_and_decay(
                 optimizer, 
-                num_warmup_steps=steps_per_epoch * self.num_epochs_warmup, 
-                num_training_steps=num_training_steps, 
-                num_cycles=(num_training_steps // steps_per_epoch) // self.num_epochs_warm_restart)
+                num_warmup_steps = warmup_steps, 
+                num_training_steps = num_training_steps, 
+                num_cycles = (num_training_steps // warmup_steps) // self.num_epochs_warm_restart,
+                decay_factor=self.sched_decay_factor
+            )
 
             scheduler = {
                 'scheduler': sched,
@@ -244,4 +258,3 @@ class TrainingxLSTMNetwork(L.LightningModule):
             optimizer = optim.SGD(self.get_params())
         # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
         return {'optimizer': optimizer } # , 'lr_scheduler': scheduler }
-    

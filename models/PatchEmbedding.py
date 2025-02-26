@@ -50,7 +50,6 @@ class TabularEmbeddings(nn.Module):
             if values is None:
                 embeddings.append(zero_tensor)
             else:
-                # print(values)
                 values = torch.as_tensor(values.values, dtype=feat.dtype).to(device)
                 values = values.clamp_max(feat.num_categories - 1)  # Ensure values are within range
                 embeddings.append(self.embeddings[feat.name](values))

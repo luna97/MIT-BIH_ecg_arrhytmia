@@ -11,7 +11,6 @@ parser = argparse.ArgumentParser(description='Create dataset for MIT-BIH')
 parser.add_argument('--data_folder', type=str, default='/media/Volume/data/MIT-BHI/data/', help='Path to raw data folder')
 parser.add_argument('--hb_split_type', type=str, default='t_wave', help='How to split the heartbeats, either t_wave or static')
 parser.add_argument('--name', type=str, default='t_wave_split', help='Name of the split')
-parser.add_argument('--nk_clean', action='store_true', help='Use neurokit2 to clean the signal')
 args = parser.parse_args()
 
 
@@ -19,6 +18,9 @@ train = [101, 106, 108, 109, 112, 114, 115, 116, 118, 119, 122, 124, 201, 203, 2
 test = [100, 103, 105, 111, 113, 117, 121, 123, 200, 202, 210, 212, 213, 214, 219, 221, 222, 228, 231, 232, 233, 234]
 
 def convert_label(symbol):
+    """
+    Convert the symbols to the main class label
+    """
     if symbol in ['N', 'L', 'R', 'e', 'j']: 
         return 'N'
     elif symbol in ['A', 'a', 'J', 'S']:
@@ -33,27 +35,77 @@ def convert_label(symbol):
         print(symbol)
         raise(f'Unknown symbol {symbol}') 
     
+def get_centered_window(signal, r_p, window_size, start, end):
+    """
+    Get a window of size window_size centered around the r_peak
 
-   
+    Args:
+        signal (np.array): ECG signal
+        r_p (int): R peak position
+        window_size (int): Size of the window
+        start (int): Start of the heartbeat, to ensure that the window starts at maximum at the start of the heartbeat
+        end (int): End of the heartbeat, to ensure that the window ends at minimum at the end of the heartbeat
+    """
+    # start at zero or at the minimum value between the start and the r_p - window_size // 2
+    start_window = max(0, min(start, r_p - window_size // 2))
+    end_window = min(len(signal), max(end, r_p + window_size // 2))
+    return start_window, end_window
+
+def get_other_window(signal, r_p, window_size, num_windows, start, end):
+    """
+    Get num_windows windows around the r_peak to increase the number of samples for the minority classes
+
+    Args:
+        signal (np.array): ECG signal
+        r_p (int): R peak position
+        window_size (int): Size of the window
+        num_windows (int): Number of windows to add
+        start (int): Start of the heartbeat, to ensure that the window starts at maximum at the start of the heartbeat
+        end (int): End of the heartbeat, to ensure that the window ends at minimum at the end of the heartbeat
+    """
+    windows = []
+    shift_size = window_size // (num_windows + 1)
+    # add before
+    for i in range(num_windows):
+        left_side = shift_size * (i + 1)
+        start_window = max(0, min(start, r_p - left_side))
+        end_window = min(len(signal), max(end, r_p + window_size - left_side))
+        windows.append((start_window, end_window))
+    return windows
+
 def crete_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_wave', name='t_wave_split'):
     all_labels = []
+
+    valid_annotations = set(['N', 'L', 'R', 'e', 'j', 'A', 'a', 'J', 'S', 'V', 'E', 'F', '/', 'f', 'Q'])
+    
 
     for patient in tqdm(patient_ids):
         signal, _ = wfdb.rdsamp(os.path.join(data_folder + 'raw', f'{patient}'))
         signal = signal[:, 0] # consider only one channel
         annotation = wfdb.rdann(os.path.join(data_folder + 'raw', f'{patient}'), 'atr')
+        header = wfdb.rdheader(os.path.join(data_folder + 'raw', f'{patient}'))
+        comment = header.comments[0]
+        try:
+            age = int(comment.split(' ')[0])
+        except:
+            age = 0
+        
+        is_male = comment.split(' ')[1] == 'M'
 
         r_peaks = annotation.sample
-        labels = annotation.symbol
+        labels_orig = annotation.symbol
 
-        counter_labels = Counter(labels)
+        counter_labels = Counter(labels_orig)
         print(f'Patient {patient} labels:', counter_labels)
 
-        valid_annotations = ['N', 'L', 'R', 'e', 'j', 'A', 'a', 'J', 'S', 'V', 'E', 'F', '/', 'f', 'Q']
-
         # filter out the annotations that are not in the valid_annotations
-        r_peaks = [r_peak for i, r_peak in enumerate(r_peaks) if labels[i] in valid_annotations]
-        labels = [label for label in labels if label in valid_annotations]
+        r_peaks = [r_peak for i, r_peak in enumerate(r_peaks) if labels_orig[i] in valid_annotations]
+        labels = [label for label in labels_orig if label in valid_annotations]
+
+        annotation_positions = [i for i, label in enumerate(labels_orig) if label == '+']
+        extra_labels = [label.removesuffix('\x00').removeprefix('(') for label in annotation.aux_note if label.startswith('(')]
+        print(f'Patient {patient} invalid annotations:', extra_labels)
+        print(f'Patient {patient} invalid annotations positions:', annotation_positions)
 
         # find the T waves offsets
         if hb_split_type == 't_wave':
@@ -73,7 +125,7 @@ def crete_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_
         file_path = os.path.join(data_folder + name, f'labels_{split}.csv')
         if not os.path.exists(file_path):
             with open(file_path, 'w') as f:
-                f.write('patient,sample_id,orig_label,label,hb_start,hb_end,r_peak,is_oversampled,win_start,win_end,age,sex\n')
+                f.write('patient,sample_id,orig_label,label,hb_start,hb_end,r_peak,is_oversampled,win_start,win_end,age,is_male,extra_annotations\n')
 
         with open(file_path, 'a') as f:
             start = 0
@@ -108,29 +160,24 @@ def crete_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_
                 # S will have 4 differet windows
                 # F will have 8 different windows
                 # Q will have 10 different windows
-
-                def get_centered_window(signal, r_p, window_size, start, end):
-                    # start at zero or at the minimum value between the start and the r_p - window_size // 2
-                    start_window = max(0, min(start, r_p - window_size // 2))
-                    end_window = min(len(signal), max(end, r_p + window_size // 2))
-                    return start_window, end_window
-
-                def get_other_window(signal, r_p, window_size, num_windows):
-                    windows = []
-                    shift_size = window_size // (num_windows + 1)
-                    # add before
-                    for i in range(num_windows):
-                        left_side = shift_size * (i + 1)
-                        start_window = max(0, min(start, r_p - left_side))
-                        end_window = min(len(signal), max(end, r_p + window_size - left_side))
-                        windows.append((start_window, end_window))
-                    return windows
+                
+                def get_extra_annotation(start, end, annotation_positions, extra_labels):
+                    anns = []
+                    for i, pos in enumerate(annotation_positions):
+                        if pos > start and pos <= end:
+                            anns.append(extra_labels[i].strip())
+                    if len(anns) == 0:
+                        return ''
+                    else:
+                        return '_'.join(anns)
                         
 
                 # consider a 10s window
                 window_size = 10 * 360
                 start_window, end_window = get_centered_window(signal, r_p, window_size, start, end)
-                f.write(f'{patient},{i},{labels[i]},{class_label},{start},{end},{r_p},False,{start_window},{end_window}\n')
+                extra_annotations = get_extra_annotation(start_window, end_window, annotation_positions, extra_labels)
+                #print(f'Extra_annotations {extra_annotations}')
+                f.write(f'{patient},{i},{labels[i]},{class_label},{start},{end},{r_p},False,{start_window},{end_window},{age},{is_male},{extra_annotations}\n')
 
                 all_labels.append(class_label)
                 if split == 'test':
@@ -146,9 +193,10 @@ def crete_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_
                 elif class_label == 'Q':
                     window_to_add = 12
 
-                for start_window, end_window in get_other_window(signal, r_p, window_size, window_to_add):
+                for start_window, end_window in get_other_window(signal, r_p, window_size, window_to_add, start, end):
                     all_labels.append(class_label)
-                    f.write(f'{patient},{i},{labels[i]},{class_label},{start},{end},{r_p},True,{start_window},{end_window}\n')
+                    extra_annotations = get_extra_annotation(start_window, end_window, annotation_positions, extra_labels)
+                    f.write(f'{patient},{i},{labels[i]},{class_label},{start},{end},{r_p},True,{start_window},{end_window},{age},{is_male},{extra_annotations}\n')
 
 
 

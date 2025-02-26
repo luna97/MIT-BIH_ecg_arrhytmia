@@ -7,20 +7,24 @@ import numpy as np
 
 class ECGMITBIHDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_folder, subset='train', num_leads=1, name='t_wave_split', oversample=False, random_shift=False, patch_size=64, normalize=True, nkclean=False):
-        self.data_folder = data_folder
+    def __init__(self, config, subset='train', num_leads=1, name='t_wave_split'):
+        self.data_folder = config.data_folder_mit
         self.subset = subset
         self.samples = []
-        self.random_shift = random_shift
-        self.nkclean = nkclean
+        self.random_shift = config.random_shift
+        self.nkclean = config.nk_clean
         self.num_leads = num_leads
-        self.samples = pd.read_csv(os.path.join(data_folder, name, f'labels_{subset}.csv'))
-        if not oversample:
+        self.use_tab_data = config.use_tab_data
+        self.patch_size = config.patch_size
+        self.normalize = config.normalize
+
+        self.samples = pd.read_csv(os.path.join(self.data_folder, name, f'labels_{subset}.csv'))
+        # ensure no Nan values
+        self.samples['extra_annotations'] = self.samples['extra_annotations'].fillna('')
+
+        if not config.oversample:
             self.samples = self.samples[self.samples['is_oversampled'] == False]
 
-        self.patch_size = patch_size
-        self.normalize = normalize
-        
         # get all the different values for column patient
         self.patients = self.samples['patient'].unique()
         self.comments = {}
@@ -28,12 +32,11 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         # load on memory all the signals
         self.signals = {}
         for patient in self.patients:
-            signal, _ = wfdb.rdsamp(os.path.join(data_folder, 'raw', f'{patient}'))
-            header = wfdb.rdheader(os.path.join(data_folder, 'raw', f'{patient}'))
+            signal, _ = wfdb.rdsamp(os.path.join(self.data_folder, 'raw', f'{patient}'))
+            header = wfdb.rdheader(os.path.join(self.data_folder, 'raw', f'{patient}'))
             # normalize the signal
             self.signals[patient] = signal
             self.comments[patient] = header.comments
-
 
     def __len__(self):
         return len(self.samples)
@@ -77,32 +80,31 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             window_signal[:, 0] = nk.ecg_clean(window_signal[:, 0], sampling_rate=360)
             heartbeat_signal[:, 0] = nk.ecg_clean(heartbeat_signal[:, 0], sampling_rate=360)
 
-        comment = self.comments[int(patient)][0].split(' ')
-        age = max(0, int(comment[0]))
+        tortn = {
+            'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),
+            'signal': torch.tensor(window_signal, dtype=torch.float32),
+            'label': self.get_label_int(sample['label']),
+        }
 
-        is_male = comment[1] == 'M'
+        if self.use_tab_data:
+            comment = self.comments[int(patient)][0].split(' ')
+            age = max(0, int(comment[0]))
 
-        # create pandas row with the tabular data
-        if self.subset == 'train':
-            # rbb and lbb ony for the training set
+            is_male = comment[1] == 'M'
+
+            # create pandas row with the tabular data
+        
             tab_data = pd.DataFrame({
                 'age': [age],
                 'is_male': [is_male],
                 'RBBB': sample['orig_label'] == 'R',
                 'LBBB': sample['orig_label'] == 'L',
+                'SB': 'SBR' in sample['extra_annotations'],
+                'AF': 'AFIB' in sample['extra_annotations'],
             })
-        else:
-            tab_data = pd.DataFrame({
-                'age': [age],
-                'is_male': [is_male]
-            })
+            tortn['tab_data'] = tab_data
 
-        return {
-            'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),
-            'signal': torch.tensor(window_signal, dtype=torch.float32),
-            'label': self.get_label_int(sample['label']),
-            'tab_data': tab_data
-        }
+        return tortn
     
     def split_validation_training(self, val_size=0.2):
         if self.subset != 'train':
@@ -135,15 +137,17 @@ def collate_fn(batch):
     labels = torch.tensor([item['label'] for item in batch])
     mask_signals = torch.nn.utils.rnn.pad_sequence(mask_signals, batch_first=True)
     mask_hb = torch.nn.utils.rnn.pad_sequence(mask_hb, batch_first=True)
-    # print('signals shape', window_signals.shape)
-    tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
-    # print('tab_data type mitbih', type(tab_data))
 
-    return {
+    tortn = {
         'heartbeat': heartbeat_signals,
         'mask_hb': mask_hb,
         'signal': window_signals,
         'mask': mask_signals,
         'label': labels,
-        'tab_data': tab_data
     }
+
+    if 'tab_data' in batch[0].keys():
+        tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
+        tortn['tab_data'] = tab_data
+
+    return tortn

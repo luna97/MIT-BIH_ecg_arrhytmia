@@ -4,7 +4,7 @@ import torch
 import os
 
 def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
-    tab_data = sample['tab_data']
+    tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
     signal = sample['signal'].to(device).unsqueeze(0)
     signal = F.pad(signal, (0, 0, 0, patch_size - signal.shape[1] % patch_size))
 
@@ -41,7 +41,7 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
     return path
     
 def plot_generation(sample, model, patch_size, device, logdir, epoch, name):
-    tab_data = sample['tab_data']
+    tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
     signal = sample['signal'].to(device).unsqueeze(0)
     prediction_tokens = torch.zeros([1, 0]).to(device)
     for i in range(0, 20):

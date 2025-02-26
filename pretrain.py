@@ -46,6 +46,7 @@ parser.add_argument('--series_decomposition', type=int, default=0, help='Series 
 parser.add_argument('--grad_clip', type=float, default=5, help='Gradient clipping value')
 parser.add_argument('--patience', type=int, default=10, help='Patience for the early stopping')
 parser.add_argument('--sched_decay_factor', type=float, default=0.8, help='Decay factor for the scheduler')
+parser.add_argument('--use_tab_data', action='store_true', help='Use tabular data')
 
 def pretrain(config, run=None, wandb=False):
 
@@ -53,7 +54,7 @@ def pretrain(config, run=None, wandb=False):
         L.seed_everything(42)
 
     if not config.pretrain_with_code15:
-        dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='train', num_leads=1, oversample=config.oversample, random_shift=config.random_shift, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
+        dataset = mit_bih.ECGMITBIHDataset(config, subset='train')
 
         # in this way I should use data that is not present in the training set due to overlapping
         train_dataset, val_dataset = dataset.split_validation_training(val_size=0.1)
@@ -62,22 +63,21 @@ def pretrain(config, run=None, wandb=False):
 
     else:
         # full code 15 for training
-        train_dataset = code_15.ECGCODE15Dataset(config.data_folder_code15, num_leads=1, random_shift=config.random_shift, patch_size=config.patch_size, normalize=config.normalize)
+        train_dataset = code_15.ECGCODE15Dataset(config)
         # train on mit-bih for validation
-        val_dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='train', num_leads=1, oversample=False, random_shift=False, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
+        val_dataset = mit_bih.ECGMITBIHDataset(config, subset='train')
 
         train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=code_15.collate_fn)
         val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn)
 
     len_train_dataset = len(train_dataset)
-    test_dataset = mit_bih.ECGMITBIHDataset(config.data_folder_mit, subset='test', num_leads=1, oversample=False, random_shift=False, patch_size=config.patch_size, normalize=config.normalize, nkclean=config.nk_clean)
+    test_dataset = mit_bih.ECGMITBIHDataset(config, subset='test')
     test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
     
     
-    xlstm = myxLSTM(num_classes=5, patch_size=config.patch_size, dropout=config.dropout, multi_token_prediction=config.multi_token_prediction, activation_fn=config.activation_fn, embedding_size=config.embedding_size, series_decomposition=config.series_decomposition, xlstm_config=config.xlstm_config)
+    xlstm = myxLSTM(config=config, num_classes=5)
     model = PretrainedxLSTMNetwork(model=xlstm, len_train_dataset=len_train_dataset, config=config)
         
-
     checkpoint_callback = ModelCheckpoint(monitor='val_nrmse')
     lr_monitor = LearningRateMonitor(logging_interval='step')
 

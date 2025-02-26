@@ -9,65 +9,56 @@ class myxLSTM(nn.Module):
 
     def __init__(
             self, 
-            num_classes=5,
-            patch_size=64,
-            dropout=0.3,
-            multi_token_prediction=True,
-            activation_fn='leakyrelu',
-            embedding_size=1024,
-            series_decomposition=0,
-            xlstm_config = ['m', 's', 'm', 'm', 'm', 'm', 'm']
+            num_classes,
+            config
         ): 
         super(myxLSTM, self).__init__()
-        self.dropout = nn.Dropout(dropout)
-        self.patch_size = patch_size
-        self.multi_token_prediction = multi_token_prediction
+        self.dropout = nn.Dropout(config.dropout)
+        self.patch_size = config.patch_size
+        self.multi_token_prediction = config.multi_token_prediction
+        self.use_tab_data = config.use_tab_data
 
-        self.series_decomposition = series_decomposition
-        if series_decomposition > 0:
-            self.sd = SeriesDecomposition(series_decomposition)
+        self.series_decomposition = config.series_decomposition
+        if config.series_decomposition > 0:
+            self.sd = SeriesDecomposition(config.series_decomposition)
 
-        self.activation = get_activation_fn(activation_fn)
+        self.activation = get_activation_fn(config.activation_fn)
 
-        self.patch_embedding = PatchEmbedding(patch_size=patch_size, num_hiddens=embedding_size)
+        self.patch_embedding = PatchEmbedding(patch_size=config.patch_size, num_hiddens=config.embedding_size)
 
-        self.sep_token = nn.Parameter(torch.randn(1, 1, embedding_size))
+        self.sep_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
 
-        self.xlstm = get_xlstm(embedding_size, dropout=dropout, blocks=xlstm_config)
+        self.xlstm = get_xlstm(config.embedding_size, dropout=config.dropout, blocks=config.xlstm_config)
 
         self.fc = nn.Sequential(
-            nn.Linear(embedding_size, embedding_size // 2),
+            nn.Linear(config.embedding_size, config.embedding_size // 2),
             self.activation,
-            nn.Linear(embedding_size // 2, num_classes),
+            nn.Linear(config.embedding_size // 2, num_classes),
         )
 
         if not self.multi_token_prediction:
-            self.reconstruction = HeadModule(embedding_size, patch_size)
+            self.reconstruction = HeadModule(config.embedding_size, config.patch_size)
         else:
-            self.rec1 = HeadModule(embedding_size, patch_size, dropout)
-            self.rec2 = HeadModule(embedding_size, patch_size, dropout)
-            self.rec3 = HeadModule(embedding_size, patch_size, dropout)
-            self.rec4 = HeadModule(embedding_size, patch_size, dropout)
+            self.rec1 = HeadModule(config.embedding_size, config.patch_size, config.dropout)
+            self.rec2 = HeadModule(config.embedding_size, config.patch_size, config.dropout)
+            self.rec3 = HeadModule(config.embedding_size, config.patch_size, config.dropout)
+            self.rec4 = HeadModule(config.embedding_size, config.patch_size, config.dropout)
     
-        self.tab_embeddings = TabularEmbeddings([
-            FeatureSpec('age', 110, torch.int64),
-            FeatureSpec('is_male', 2, torch.bool),
-            # FeatureSpec('RBBB', 2, torch.bool),
-            # FeatureSpec('LBBB', 2, torch.bool),
-            # FeatureSpec('normal_ecg', 2, torch.bool),
-        ], num_hiddens=embedding_size, dropout=dropout)
+        if self.use_tab_data:
+            self.tab_embeddings = TabularEmbeddings([
+                FeatureSpec('age', 110, torch.int64),
+                FeatureSpec('is_male', 2, torch.bool),
+                FeatureSpec('RBBB', 2, torch.bool),
+                FeatureSpec('LBBB', 2, torch.bool),
+                FeatureSpec('SB', 2, torch.bool), # Sinus Bradycardia
+                FeatureSpec('AF', 2, torch.bool), # Atrial Fibrillation
+                # FeatureSpec('1dAVb', 2, torch.bool), # first degree AV block, not present in the mit_bih dataset
+                # #['age', 'is_male', '1dAVb', 'RBBB', 'LBBB', 'SB', 'ST', 'AF', 'normal_ecg'],
+            ], num_hiddens=config.embedding_size, dropout=config.dropout)
 
 
     def reconstruct(self, x, tab_data):
-        # mean = x.mean(dim=1, keepdim=True)
-        # std = x.std(dim=1, keepdim=True)
-        # x = (x - mean) / std
-
-        batch_size = x.shape[0]
-        tab_emb = self.tab_embeddings(tab_data, batch_size)
-        _, num_embeddings, _ = tab_emb.shape
-
-        if self.series_decomposition:
+        if self.series_decomposition > 0:
             res, trend = self.sd(x)
             # add channels 
             x = torch.cat([x, res, trend], dim=-1)
@@ -77,10 +68,18 @@ class myxLSTM(nn.Module):
         x = x.permute(0, 2, 1) # put the channels in the middle
         x = self.patch_embedding(x)
 
-        x = torch.cat([tab_emb, x], dim=1)
+        if self.use_tab_data:
+            # eventually add the tabular data
+            batch_size = x.shape[0]
+            tab_emb = self.tab_embeddings(tab_data, batch_size)
+            _, num_embeddings, _ = tab_emb.shape
+            x = torch.cat([tab_emb, x], dim=1)
+
         x = self.xlstm(x)
 
-        x = x[:, num_embeddings:, :]
+        if self.use_tab_data:
+            # remove the tabular data
+            x = x[:, num_embeddings:, :]
 
         if self.multi_token_prediction:
             x1 = self.rec1(x)

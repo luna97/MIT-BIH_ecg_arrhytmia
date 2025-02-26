@@ -90,7 +90,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
     def reconstruct_batch(self, batch, step):
         x = batch["signal"]
         mask = batch["mask"]
-        tab_data = batch["tab_data"]
+        tab_data = batch["tab_data"] if "tab_data" in batch.keys() else None
 
         x = F.pad(x, (0, 0, 0, self.patch_size - x.shape[1] % self.patch_size))
         mask = F.pad(mask, (0, 0, 0, self.patch_size - mask.shape[1] % self.patch_size))

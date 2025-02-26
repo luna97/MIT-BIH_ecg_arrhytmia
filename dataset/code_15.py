@@ -7,20 +7,22 @@ import pandas as pd
 from dataset.helper_code_code15 import find_records, load_label, load_signals
 
 class ECGCODE15Dataset(Dataset):
-    def __init__(self, data_folder, normalize=True, num_leads=1, random_shift=False, patch_size=64):
+    def __init__(self, config, num_leads=1):
         """
         Args:
             records (list): List of records of ECG traces
         """
-        self.records = find_records(data_folder)
+        self.records = find_records(config.data_folder_code15)
         print(f'loaded {len(self.records)} records')
-        self.data_folder = data_folder
-        self.normalize = normalize 
+        self.data_folder = config.data_folder_code15
+        self.normalize = config.normalize 
         self.num_leads = num_leads
-        self.random_shift = random_shift
-        self.patch_size = patch_size
-        self.load_tabular_data()
-
+        self.random_shift = config.random_shift
+        self.patch_size = config.patch_size
+        self.use_tab_data = config.use_tab_data
+        
+        if self.use_tab_data:
+            self.load_tabular_data()
 
     def load_tabular_data(self):
         # get the csv file with the tabular data
@@ -44,14 +46,9 @@ class ECGCODE15Dataset(Dataset):
             shift = np.random.randint(0, self.patch_size // 2)
             if shift > 0 and len(signal) > shift:
                 signal = signal[shift:]
-            elif shift != 0:
-                print('there is a problem with the shift, signal length', len(signal), 'shift', shift)
 
         signal = torch.tensor(signal[:, :self.num_leads], dtype=torch.float32)
         # print('dioss shape', signal.shape)
-
-        # if the signal contains NaNs, replace them with 0
-        signal[torch.isnan(signal)] = 0
 
         # normalize the signal by subtracting the mean and dividing by the standard deviation
         if self.normalize:
@@ -59,14 +56,18 @@ class ECGCODE15Dataset(Dataset):
             if std != 0:
                 signal = (signal - signal.mean(axis=0)) / std
 
-        tab_data = self.tab_data.loc[int(record)]
-        # to dataframe
-        tab_data = pd.DataFrame(tab_data)
-            
-        return {
+        tortn = {
             'signal': signal,
-            'tab_data': tab_data
         }
+
+        if self.use_tab_data:
+            tab_data = self.tab_data.loc[int(record)]
+            # to dataframe
+            tab_data = pd.DataFrame(tab_data)
+            tortn['tab_data'] = tab_data
+        
+        return tortn
+        
     
     def split_validation_training(self, val_size_pct = 0.1):
         """
@@ -92,12 +93,14 @@ def collate_fn(batch):
         
     padded_masks = torch.nn.utils.rnn.pad_sequence(masks, batch_first=True)
 
-    tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
-    # print('tab_data type code15', type(tab_data))
-
-    return {
+    tortn =  {
         'signal': padded_signals,
         'mask': padded_masks,
-        'tab_data': tab_data
     }
+
+    if 'tab_data' in batch[0].keys():
+        tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
+        tortn['tab_data'] = tab_data
+
+    return tortn
 

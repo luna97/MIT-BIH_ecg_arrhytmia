@@ -4,15 +4,30 @@ import numpy as np
 from torch.nn import functional as F
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, patch_size=64, num_hiddens=256):
+    def __init__(self, patch_size=64, num_hiddens=256, num_channels=12):
         super().__init__()
-
-        self.conv = nn.LazyConv1d(num_hiddens, kernel_size=patch_size, stride=patch_size)
+        self.conv = nn.Conv1d(num_channels, num_hiddens, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        # print('X shape', X.shape)
-        # Output shape: (batch size, no. of patches, no. of channels)
-        return self.conv(x).flatten(2).transpose(1, 2)
+        x = self.conv(x).flatten(2).transpose(1, 2)
+        return x
+    
+    def get_patch(self, x):
+        x = x.transpose(1, 2)
+        # perfrorm deconvolution to get the patch
+        x = nn.functional.conv_transpose1d(x, self.conv.weight, stride=self.conv.stride).transpose(1, 2)
+        return x
+    
+class EmbeddingToPatch(nn.Module):
+    def __init__(self, patch_size=64, num_hiddens=256, num_channels=12):
+        super().__init__()
+        self.deconv = nn.ConvTranspose1d(num_hiddens, num_channels, kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x):
+        x = self.deconv(x).flatten(2).transpose(1, 2)
+        return x
+    
+    
 
 
 class FeatureSpec(object):
@@ -20,7 +35,6 @@ class FeatureSpec(object):
         self.name = name
         self.num_categories = num_categories
         self.dtype = dtype
-        torch.fft
  
 
 class TabularEmbeddings(nn.Module):
@@ -58,7 +72,6 @@ class TabularEmbeddings(nn.Module):
         tortn = self.dropout(tortn)
         return tortn
     
-
 
 class FeatureDropout(nn.Module):
     """

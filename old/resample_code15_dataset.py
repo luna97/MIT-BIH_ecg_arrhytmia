@@ -7,6 +7,7 @@ import numpy as np
 import wfdb
 from joblib import Parallel, delayed
 from neurokit2 import ecg_clean 
+from dataset.dataset_preparation_utils import resample_and_save_record
 
 # sudo rm -rf  /media/Volume/data/CODE15/unlabeled_records_360/
 # sudo mkdir  /media/Volume/data/CODE15/unlabeled_records_360/
@@ -44,7 +45,7 @@ def resample_signal(record, folder, output_path, leads, nk_clean):
             print(f"Record {record} has zeros only for lead {l} and length {signal.shape[0]} - skipping")
             return
         # skip short records
-        if len(signal[:, i]) < 128:
+        if len(signal[:, i]) < 360:
             print(f"Record {record} has less than 128 samples for lead {l} - skipping")
             return
         # skip nan records

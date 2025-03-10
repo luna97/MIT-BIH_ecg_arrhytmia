@@ -1,77 +1,113 @@
 from torch.nn import functional as F
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import torch
 import os
+import numpy as np
+
+color_1 = (50 / 255, 134 / 255, 143 / 255)
+color_2 = (207/ 255, 86/ 255, 86/ 255)
+
+leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 
 def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
-    tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
-    signal = sample['signal'].to(device).unsqueeze(0)
-    signal = F.pad(signal, (0, 0, 0, patch_size - signal.shape[1] % patch_size))
+    with torch.no_grad():
+        tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
+        signal = sample['signal'].to(device).unsqueeze(0)
+        if len(signal.shape) == 2:
+            signal = signal.unsqueeze(-1)
+        
+        reconstruct = model.reconstruct(signal, tab_data) # [batch_size, seq_len // 64, patch_size]
+        # if reconstruct is a tuple, get the first element
+        if isinstance(reconstruct, tuple):
+            reconstruct = reconstruct[0]
 
-    reconstruct, _, _, _ = model.reconstruct(signal, tab_data) # [batch_size, seq_len // 64, patch_size]
-    shift_x = signal[:, :reconstruct.shape[1]]
-    shift_x = shift_x[:, patch_size:].squeeze()
+        shift_x = signal[:, :reconstruct.shape[1]]
+        shift_x = shift_x[:, patch_size:].squeeze()
 
+        shift_reconstruct = reconstruct[:, :-patch_size]
 
-    shift_reconstruct = reconstruct[:, :-patch_size]
+        # try to reconstruct one element at a time
+        reconstruct = reconstruct.view(1, -1, signal.shape[-1])
+        shift_x = shift_x.view(1, -1, signal.shape[-1])
 
-    # try to reconstruct one element at a time
-    reconstruct = reconstruct.view(1, -1)
-    shift_x = shift_x.view(1, -1)
-    #print('rec shape', reconstruct.shape)
-    #print('shift_x shape', shift_x.shape)
+        fig = plt.figure(figsize=(20, 15))
+        gs = gridspec.GridSpec(signal.shape[-1] // 2, 2)
+        gs.update(wspace=0.08, hspace=0.16)
 
+        for i in range(signal.shape[-1]):
+            ax = plt.subplot(gs[i % 6, i // 6])
+            ax.plot(shift_x[..., i].cpu().squeeze().numpy(), color=color_1)
+            ax.plot(shift_reconstruct[..., i].cpu().squeeze().numpy(), color=color_2)
+            ax.set_title(leads[i])
 
-    # plot the original and reconstructed signal
-    plt.figure(figsize=(10, 4))
-    plt.plot(shift_x.squeeze().cpu().numpy(), label='original')
-    plt.plot(shift_reconstruct.squeeze().detach().cpu().numpy(), label='reconstructed')
-    # add a pipe avery patch size samples
-    for i in range(1, signal.shape[1] // patch_size - 1):
-        plt.axvline(x=patch_size*i, color='gray', linestyle='--')
+            # add vertical lines avery patch size
+            for j in range(0, shift_x.shape[1], patch_size):
+                ax.axvline(j, color='gray', linestyle='--', linewidth=0.5)
 
-    plt.legend()
+            ax.set_yticks([])
+            if i == 0:
+                ax.legend(['Original', 'Reconstructed'], loc='upper left')
 
-    # mkdir if it does not exist
-    os.makedirs(f'{logdir}/epoch_{epoch}', exist_ok=True)
+            if i == 5 or i == 11:
+                ax.set_xticks(np.arange(0, len(shift_x[0]), 360))
+                ax.set_xticklabels(np.arange(0, len(shift_x[0]), 360) // 360)
+                ax.set_xlabel('Time (s)')
+            else:
+                ax.set_xticks([])
 
-    path = f'{logdir}/epoch_{epoch}/reconstruction_{name}.png'
-    plt.savefig(path)
-    plt.close()
-    return path
+        # mkdir if it does not exist
+        os.makedirs(f'{logdir}/epoch_{epoch}', exist_ok=True)
+
+        path = f'{logdir}/epoch_{epoch}/reconstruction_{name}.png'
+        plt.savefig(path)
+        plt.close()
+        return path
     
 def plot_generation(sample, model, patch_size, device, logdir, epoch, name):
-    tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
-    signal = sample['signal'].to(device).unsqueeze(0)
-    prediction_tokens = torch.zeros([1, 0]).to(device)
-    for i in range(0, 20):
-        if i == 0:
-            new_signal = signal
-        else:
-            flatten_preds = prediction_tokens.view(1, -1)
-            new_signal = torch.cat([signal, flatten_preds.unsqueeze(-1)], dim=1)
+    with torch.no_grad():
+        tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
+        signal = sample['signal'].to(device).unsqueeze(0)
 
-        r1, _, _, _ = model.reconstruct(new_signal, tab_data=tab_data)
-        # print('reconstruct shape', reconstruct.shape)
-        # the last token is the prediction
-        p1 = r1[:, -patch_size:]
+        signal = signal[:, :signal.shape[1] - signal.shape[1] % patch_size]
+        if len(signal.shape) == 2:
+            signal = signal.unsqueeze(-1)
 
-        prediction_tokens = torch.cat([prediction_tokens, p1], dim=1)
+        generated = model.generate(signal, tab_data=tab_data, length=12)
 
-    predictions = prediction_tokens.squeeze().view(-1)
+        fig = plt.figure(figsize=(20, 15))
+        gs = gridspec.GridSpec(signal.shape[-1] // 2, 2)
+        gs.update(wspace=0.08, hspace=0.16)
 
-    plt.figure(figsize=(10, 4))
-    plt.plot(signal[0, :-patch_size].squeeze().cpu().numpy(), label='original')
-    plt.plot(range(len(signal[0, :-patch_size]), len(signal[0, :-patch_size]) + len(predictions)), predictions.detach().cpu().numpy(), label='prediction')
-    # add a pipe avery 64 samples
-    for i in range(0, (len(signal[0]) + len(predictions)) // patch_size -1):
-        plt.axvline(x=patch_size*i, color='gray', linestyle='--')
-    plt.legend()
+        for i in range(signal.shape[-1]):
+            ax = plt.subplot(gs[i % 6, i // 6])
+            ax.plot(signal[..., i].cpu().squeeze().numpy(), color=color_1)
+            ax.plot(
+                range(signal.shape[1], signal.shape[1] + generated.shape[1]),
+                generated[..., i].cpu().squeeze().numpy(), color=color_2)
+            ax.set_title(leads[i],)
 
-    # mkdir if it does not exist
-    os.makedirs(f'{logdir}/epoch_{epoch}', exist_ok=True)
+            # add vertical lines avery patch size
+            for j in range(0, signal.shape[1] + generated.shape[1], patch_size):
+                ax.axvline(j, color='gray', linestyle='--', linewidth=0.5)
 
-    path = f'{logdir}/epoch_{epoch}/generation_{name}.png'
-    plt.savefig(path)
-    plt.close()
-    return path
+            ax.set_yticks([])
+            if i == 0:
+                ax.legend(['Original', 'Generated'], loc='upper left')
+
+            if i == 5 or i == 11:
+                ax.set_xticks(np.arange(0, len(signal[0]), 360))
+                ax.set_xticklabels(np.arange(0, len(signal[0]), 360) // 360)
+                ax.set_xlabel('Time (s)')
+            else:
+                ax.set_xticks([])
+
+        # mkdir if it does not exist
+        os.makedirs(f'{logdir}/epoch_{epoch}', exist_ok=True)
+
+        path = f'{logdir}/epoch_{epoch}/generation_{name}.png'
+        plt.savefig(path)
+        plt.close()
+        return path
+
+

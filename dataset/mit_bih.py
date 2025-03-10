@@ -5,18 +5,24 @@ import wfdb
 import neurokit2 as nk
 import numpy as np
 
+leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+conversion = {
+    'MLII' : 'II',
+}
+
 class ECGMITBIHDataset(torch.utils.data.Dataset):
 
-    def __init__(self, config, subset='train', num_leads=1, name='t_wave_split'):
+    def __init__(self, config, subset='train', name='t_wave_split'):
         self.data_folder = config.data_folder_mit
         self.subset = subset
         self.samples = []
         self.random_shift = config.random_shift
         self.nkclean = config.nk_clean
-        self.num_leads = num_leads
         self.use_tab_data = config.use_tab_data
         self.patch_size = config.patch_size
         self.normalize = config.normalize
+
+        self.leads_to_use = leads if config.leads == ['*'] else config.leads
 
         self.samples = pd.read_csv(os.path.join(self.data_folder, name, f'labels_{subset}.csv'))
         # ensure no Nan values
@@ -27,7 +33,7 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
 
         # get all the different values for column patient
         self.patients = self.samples['patient'].unique()
-        self.comments = {}
+        self.headers = {}
 
         # load on memory all the signals
         self.signals = {}
@@ -36,7 +42,7 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             header = wfdb.rdheader(os.path.join(self.data_folder, 'raw', f'{patient}'))
             # normalize the signal
             self.signals[patient] = signal
-            self.comments[patient] = header.comments
+            self.headers[patient] = header
 
     def __len__(self):
         return len(self.samples)
@@ -52,7 +58,9 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         sample = self.samples.iloc[idx]
         patient = sample['patient']
         signal = self.signals[patient]
-        heartbeat_signal = signal[sample['hb_start']:sample['hb_end'], :self.num_leads]
+        signal = torch.tensor(signal, dtype=torch.float32)
+        header = self.headers[patient]
+        heartbeat_signal = signal[sample['hb_start']:sample['hb_end']]
 
         if self.random_shift:
             window_start = sample['win_start']
@@ -63,26 +71,32 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             # ensure that the window is inside the signal
             window_start = max(0, window_start)
             window_end = min(window_end, len(signal))
-            window_signal = signal[window_start:window_end, :self.num_leads]
+            window_signal = signal[window_start:window_end]
         else:
-            window_signal = signal[sample['win_start']:sample['win_end'], :self.num_leads]
-
-        if window_signal.shape[0] == 0:
-            print(f'index {idx}, patient {patient}, window_signal shape {window_signal.shape}, heartbeat_signal shape {heartbeat_signal.shape}')
+            window_signal = signal[sample['win_start']:sample['win_end']]
 
         if self.normalize:
-            if window_signal.std(axis=0) != 0:
-                window_signal = (window_signal - window_signal.mean(axis=0)) / window_signal.std(axis=0)
-            if heartbeat_signal.std(axis=0) != 0:
-                heartbeat_signal = (heartbeat_signal - heartbeat_signal.mean(axis=0)) / heartbeat_signal.std(axis=0)
+            std = window_signal.std(axis=(0, -1))
+            std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
+            window_signal = (window_signal - window_signal.mean(axis=(0, -1))) / std
+
+            std = heartbeat_signal.std(axis=(0, -1))
+            std[std == 0] = 1
+            heartbeat_signal = (heartbeat_signal - heartbeat_signal.mean(axis=(0, -1))) / std
+
+        # print('window_signal', window_signal.shape)
 
         if self.nkclean:
-            window_signal[:, 0] = nk.ecg_clean(window_signal[:, 0], sampling_rate=360)
-            heartbeat_signal[:, 0] = nk.ecg_clean(heartbeat_signal[:, 0], sampling_rate=360)
+            for i in range(window_signal.shape[1]):
+                window_signal[:, i] = torch.tensor(nk.ecg_clean(window_signal[:, i].clone().detach().numpy(), sampling_rate=360).copy(), dtype=torch.float32)
+                heartbeat_signal[:, i] = torch.tensor(nk.ecg_clean(heartbeat_signal[:, i].clone().detach().numpy(), sampling_rate=360).copy(), dtype=torch.float32)
+
+        window_signal = self.filter_leads(window_signal, header.__dict__['sig_name'])
+        heartbeat_signal = self.filter_leads(heartbeat_signal, header.__dict__['sig_name'])
 
         tortn = {
-            'heartbeat': torch.tensor(heartbeat_signal, dtype=torch.float32),
-            'signal': torch.tensor(window_signal, dtype=torch.float32),
+            'heartbeat': heartbeat_signal,
+            'signal': window_signal,
             'label': self.get_label_int(sample['label']),
         }
 
@@ -106,6 +120,27 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
 
         return tortn
     
+    def filter_leads(self, signal, leads):
+        # convert leads if needed 
+        for i, lead in enumerate(leads):
+            if lead in conversion.keys():
+                leads[i] = conversion[lead]
+
+        # print('leads', leads)
+
+        signal_to_return = torch.zeros(signal.shape[0], len(self.leads_to_use), dtype=torch.float32)
+        # if the leads to use are not present in the signal set them to zero
+        # leads present in the signal that are not in the leads to use are removed
+        # the rest is kept unchanged
+        for i, lead in enumerate(self.leads_to_use):
+            if lead not in leads:
+                signal_to_return[:, i] = torch.zeros(signal.shape[0])
+            else:
+                signal_to_return[:, i] = signal[:, leads.index(lead)]
+        return signal_to_return
+
+
+    
     def split_validation_training(self, val_size=0.2):
         if self.subset != 'train':
             raise ValueError('Can only split the training dataset')
@@ -127,22 +162,16 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
 def collate_fn(batch):
     signals = [item['signal'] for item in batch]
     hb = [item['heartbeat'] for item in batch]
-    mask_signals = [torch.ones_like(item['signal'], dtype=torch.bool) for item in batch]
-    mask_hb = [torch.ones_like(item['heartbeat'], dtype=torch.bool) for item in batch]
 
     # pad to same length and pad to match the patch size module
     heartbeat_signals = torch.nn.utils.rnn.pad_sequence(hb, batch_first=True)
 
     window_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
     labels = torch.tensor([item['label'] for item in batch])
-    mask_signals = torch.nn.utils.rnn.pad_sequence(mask_signals, batch_first=True)
-    mask_hb = torch.nn.utils.rnn.pad_sequence(mask_hb, batch_first=True)
 
     tortn = {
         'heartbeat': heartbeat_signals,
-        'mask_hb': mask_hb,
         'signal': window_signals,
-        'mask': mask_signals,
         'label': labels,
     }
 

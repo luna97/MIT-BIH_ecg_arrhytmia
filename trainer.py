@@ -2,7 +2,7 @@ from torch import optim, nn
 import lightning as L
 import torchmetrics
 import torchmetrics.classification
-from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss
+from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss, masked_min_max_loss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn import functional as F
 from plot_utils import plot_reconstruction, plot_generation
@@ -57,6 +57,27 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         loss = self.reconstruct_batch(batch, step='test')
         self.log("test_mse", loss.item(), prog_bar=True, batch_size=self.batch_size)
         return loss
+    
+    def on_train_epoch_end(self):
+        """
+        When the training loop ends, some representative plots from different classes are saved on wandb
+        """
+        sample_1 = self.trainer.train_dataloader.dataset[0]
+        sample_2 = self.trainer.train_dataloader.dataset[87]
+
+        log_dir = self.logger.log_dir if self.logger.log_dir is not None else self.logger.experiment.dir
+
+        img_1 = plot_reconstruction(sample_1, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_1')
+        img_2 = plot_reconstruction(sample_2, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_2')
+        if isinstance(self.logger, lightning.pytorch.loggers.WandbLogger):
+            self.logger.log_image(key="reconstructions_train", images=[img_1, img_2])
+        
+        img_1 = plot_generation(sample_1, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_1')
+        img_2 = plot_generation(sample_2, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_2')
+        if isinstance(self.logger, lightning.pytorch.loggers.WandbLogger):
+            self.logger.log_image(key="generations_train", images=[img_1, img_2])
+
+        return super().on_train_epoch_end()
 
     def on_validation_epoch_end(self):
         """
@@ -83,17 +104,19 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         img_n = plot_generation(sample_n, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_n')
         if isinstance(self.logger, lightning.pytorch.loggers.WandbLogger):
             self.logger.log_image(key="generations", images=[img_s, img_v, img_t, img_n])
-
         return super().on_validation_epoch_end()
-
     
     def reconstruct_batch(self, batch, step):
         x = batch["signal"]
-        mask = batch["mask"]
+
+        # print('x shape', x.shape)
+
+        if len(x.shape) == 2:
+            x = x.unsqueeze(-1)
+
         tab_data = batch["tab_data"] if "tab_data" in batch.keys() else None
 
         x = F.pad(x, (0, 0, 0, self.patch_size - x.shape[1] % self.patch_size))
-        mask = F.pad(mask, (0, 0, 0, self.patch_size - mask.shape[1] % self.patch_size))
 
         reconstruction = self.model.reconstruct(x, tab_data)
 
@@ -101,31 +124,38 @@ class PretrainedxLSTMNetwork(L.LightningModule):
             # tokens as array from uple
             tokens = [r1, r2, r3, r4] = reconstruction
         else:
-            tokens = [r]
+            tokens = [reconstruction]
 
-        maes, mses, grads = [], [], []
+        maes, mses, grads, min_max = [], [], [], []
         nrmse = np.inf
 
         for i, r in enumerate(tokens, start=1):
             shift_x = x[:, self.patch_size * i:].squeeze()
-            mask_shifted = mask[:, self.patch_size * i:].squeeze()
             shift_reconstruct = r[:, :-self.patch_size * i]
+
+            # print('shift_x shape', shift_x.shape)
+            # print('shift_reconstruct shape', shift_reconstruct.shape)
+
+            if self.loss_type in ['min_max', 'grad_min_max']:
+                min_max.append(masked_min_max_loss(shift_reconstruct, shift_x, patch_size=self.patch_size))
+            else:
+                with torch.no_grad(): min_max.append(masked_min_max_loss(shift_reconstruct, shift_x, patch_size=self.patch_size))
 
             # compute the loss and use the gradients only when it is needed
             if self.loss_type == 'mae':
-                maes.append(masked_mae_loss(shift_reconstruct, shift_x, mask=mask_shifted))
+                maes.append(masked_mae_loss(shift_reconstruct, shift_x))
             else:
-                with torch.no_grad(): maes.append(masked_mae_loss(shift_reconstruct, shift_x, mask=mask_shifted))
+                with torch.no_grad(): maes.append(masked_mae_loss(shift_reconstruct, shift_x))
 
-            if self.loss_type == 'grad':
-                grads.append(gradient_loss(shift_reconstruct, shift_x, mask=mask_shifted))
+            if self.loss_type in ['grad', 'grad_min_max']:
+                grads.append(gradient_loss(shift_reconstruct, shift_x))
             else:
-                with torch.no_grad(): grads.append(gradient_loss(shift_reconstruct, shift_x, mask=mask_shifted))
+                with torch.no_grad(): grads.append(gradient_loss(shift_reconstruct, shift_x))
             
-            if self.loss_type == 'mse' or self.loss_type == 'grad':
-                mse = masked_mse_loss(shift_reconstruct, shift_x, mask=mask_shifted, reduction='None')
+            if self.loss_type in ['mse', 'grad', 'min_max', 'grad_min_max']:
+                mse = masked_mse_loss(shift_reconstruct, shift_x, reduction='none')
             else:
-                with torch.no_grad(): mse = masked_mse_loss(shift_reconstruct, shift_x, mask=mask_shifted, reduction='None')
+                with torch.no_grad(): mse = masked_mse_loss(shift_reconstruct, shift_x, reduction='none')
             
             mses.append(mse.mean())
 
@@ -137,19 +167,21 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         mae = sum(maes) / len(maes)
         mse = sum(mses) / len(mses)
         grad = sum(grads) / len(grads)
+        min_max = sum(min_max) / len(min_max)
 
 
         self.log(f"{step}_mse", mse.item(), prog_bar=True, batch_size=self.batch_size)
         self.log(f"{step}_mae", mae.item(), prog_bar=True, batch_size=self.batch_size)
         self.log(f"{step}_grad", grad.item(), prog_bar=True, batch_size=self.batch_size)
+        self.log(f"{step}_min_max", min_max.item(), prog_bar=True, batch_size=self.batch_size)
         self.log(f"{step}_nrmse", nrmse.mean().item(), prog_bar=True, batch_size=self.batch_size)
         
-        if self.loss_type == 'mae':
-            return mae
-        elif self.loss_type == 'grad':
-            return grad + mse 
-        else:
-            return mse
+        if self.loss_type == 'mae': return mae
+        if self.loss_type == 'mse':  return mse
+        elif self.loss_type == 'grad': return grad + mse 
+        if self.loss_type == 'min_max': return min_max  + mse
+        if self.loss_type == 'grad_min_max': return grad + min_max + mse
+        else: raise ValueError(f"Invalid loss type {self.loss_type}")
 
     def configure_optimizers(self):
         if self.optimizer == 'adam':
@@ -165,11 +197,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
             steps_per_epoch = np.ceil(self.len_train_dataset / self.batch_size)
             num_training_steps = steps_per_epoch * self.epochs
             warmup_steps = steps_per_epoch * self.num_epochs_warmup
-            # sched = get_cosine_with_hard_restarts_schedule_with_warmup(
-            #    optimizer, 
-            #    num_warmup_steps=steps_per_epoch * self.num_epochs_warmup, 
-            #    num_training_steps=num_training_steps, 
-            #    num_cycles=(num_training_steps // steps_per_epoch) // self.num_epochs_warm_restart)
+
             sched = get_cosine_with_hard_restarts_schedule_with_warmup_and_decay(
                 optimizer, 
                 num_warmup_steps = warmup_steps, 

@@ -55,8 +55,6 @@ parameters:
     value: True
   grad_clip:
     value: 5
-  series_decomposition:
-    value: 0
   patience:
     value: 10
   nk_clean:

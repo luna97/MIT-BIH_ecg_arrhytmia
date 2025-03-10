@@ -23,59 +23,36 @@ def get_pooling(pooling, kernel_size=2):
         return nn.AvgPool1d(kernel_size=kernel_size)
     else:
         raise ValueError(f"Pooling {pooling} not supported")
-    
-def get_sLSTM(embedding_dim, dropout=0.2):
-    cfg = xLSTMBlockStackConfig(
-        mlstm_block=None,
-        slstm_block = sLSTMBlockConfig(
-            slstm=sLSTMLayerConfig(
-                backend="cuda",
-                num_heads=4,
-                conv1d_kernel_size=3,
-                bias_init="powerlaw_blockdependent",
-            ),
-            feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu"),
-        ),
-        num_blocks=1,
-        embedding_dim=embedding_dim,
-        dropout=dropout,
-        slstm_at=[0],
-    )
-
-    return xLSTMBlockStack(cfg)
-
-def get_mLSTM(embedding_dim, dropout=0.2):
-    cfg = xLSTMBlockStackConfig(
-        mlstm_block=mLSTMBlockConfig(
-            mlstm=mLSTMLayerConfig(
-                conv1d_kernel_size=3, 
-                qkv_proj_blocksize=4, 
-                num_heads=4,
-            )
-        ),
-        slstm_block=None,
-        num_blocks=1,
-        embedding_dim=embedding_dim,
-        dropout=dropout,
-        context_length=700,
-        slstm_at=[],
-    )
-
-    return xLSTMBlockStack(cfg)
 
 
 def get_xlstm(
         embedding_dim, 
         dropout=0.2, 
-        blocks=['m', 's', 'm', 'm', 'm', 'm', 'm']
+        blocks=['m', 's', 'm', 'm', 'm', 'm', 'm'],
+        num_heads=4
     ):
-    xlstm = nn.ModuleList()
-    for block in blocks:
-        if block == 'm':
-            xlstm.append(get_mLSTM(embedding_dim, dropout)) 
-        elif block == 's':
-            xlstm.append(get_sLSTM(embedding_dim, dropout))
-        else:
-            raise ValueError(f"Block {block} not supported")
-        
-    return nn.Sequential(*xlstm)
+    cfg = xLSTMBlockStackConfig(
+        mlstm_block=mLSTMBlockConfig(
+            mlstm=mLSTMLayerConfig(
+                conv1d_kernel_size=4, 
+                qkv_proj_blocksize=num_heads, 
+                num_heads=num_heads
+            )
+        ),
+        slstm_block=sLSTMBlockConfig(
+            slstm=sLSTMLayerConfig(
+                backend="cuda",
+                num_heads=num_heads,
+                conv1d_kernel_size=4,
+                bias_init="powerlaw_blockdependent",
+            ),
+            feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu"),
+        ),
+        context_length=700,
+        num_blocks=len(blocks),
+        embedding_dim=embedding_dim,
+        slstm_at=[1 if b == 's' else 0 for b in blocks],
+        dropout=dropout,
+    )
+
+    return xLSTMBlockStack(cfg)

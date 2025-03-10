@@ -1,29 +1,28 @@
-from torch.utils.data import Dataset, random_split
 import torch
-import numpy as np
-import wfdb
 import os
 import pandas as pd
+import wfdb
+import neurokit2 as nk
+import numpy as np
 from dataset.generic_utils import random_shift, find_records
+from torch.utils.data import random_split
+from joblib import Parallel, delayed
 
 leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 
-class ECGCODE15Dataset(Dataset):
+class ECGMIMICDataset(torch.utils.data.Dataset):
+
     def __init__(self, config, leads_to_use=leads):
-        """
-        Args:
-            records (list): List of records of ECG traces
-        """
-        self.records = find_records(config.data_folder_code15)
-        print(f'loaded {len(self.records)} records')
-        self.data_folder = config.data_folder_code15
-        self.labels_file = config.labels_file_code15
-        self.normalize = config.normalize 
-        self.leads = leads if leads_to_use == ['*'] else leads_to_use
+        self.data_folder = config.data_folder_mimic
         self.random_shift = config.random_shift
-        self.patch_size = config.patch_size
+        self.nkclean = config.nk_clean
+        self.leads = leads if leads_to_use == ['*'] else leads_to_use
         self.use_tab_data = config.use_tab_data
-        
+        self.patch_size = config.patch_size
+        self.normalize = config.normalize
+        self.labels_file = config.labels_file_mimic
+        self.records = find_records(config.data_folder_mimic)
+        print(f'loaded {len(self.records)} records') 
         if self.use_tab_data:
             self.load_tabular_data()
 
@@ -41,10 +40,9 @@ class ECGCODE15Dataset(Dataset):
 
     def __getitem__(self, idx):
         record = self.records[idx]
-        
-        signal, _ = wfdb.rdsamp(os.path.join(self.data_folder, record))
 
-        # remove a random number of datapoints from the signal from 0 to patch size 
+        signal, _ = wfdb.rdsamp(os.path.join(self.data_folder, record))
+        
         if self.random_shift: signal = random_shift(signal, self.patch_size)
 
         signal = torch.tensor(signal, dtype=torch.float32)
@@ -52,8 +50,6 @@ class ECGCODE15Dataset(Dataset):
         if self.leads != leads:
             # keep the selected leads
             signal = signal[:, [leads.index(lead) for lead in self.leads]].squeeze()
-            
-        # print('code15', signal.shape)
 
         # normalize the signal by subtracting the mean and dividing by the standard deviation
         if self.normalize:
@@ -61,19 +57,9 @@ class ECGCODE15Dataset(Dataset):
             std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
             signal = (signal - signal.mean(axis=(0, -1))) / std
 
-        tortn = {
-            'signal':signal
+        return {
+            'signal':signal,
         }
-        # print('code15', signal.shape)
-
-        if self.use_tab_data:
-            tab_data = self.tab_data.loc[int(record)]
-            # to dataframe
-            tab_data = pd.DataFrame(tab_data)
-            tortn['tab_data'] = tab_data
-        
-        return tortn
-        
     
     def split_validation_training(self, val_size_pct = 0.1):
         """
@@ -91,14 +77,9 @@ class ECGCODE15Dataset(Dataset):
 def collate_fn(batch):
     signals = [item['signal'] for item in batch]
     padded_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
-        
+
     tortn =  {
         'signal': padded_signals,
     }
 
-    if 'tab_data' in batch[0].keys():
-        tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
-        tortn['tab_data'] = tab_data
-
     return tortn
-

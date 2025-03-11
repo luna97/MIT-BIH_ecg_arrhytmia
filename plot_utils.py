@@ -14,6 +14,7 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
     with torch.no_grad():
         tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
         signal = sample['signal'].to(device).unsqueeze(0)
+        orig_signal = signal.clone()
         if len(signal.shape) == 2:
             signal = signal.unsqueeze(-1)
         
@@ -23,7 +24,9 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
             reconstruct = reconstruct[0]
 
         shift_x = signal[:, :reconstruct.shape[1]]
+        orig_signal = orig_signal[:, :reconstruct.shape[1]]
         shift_x = shift_x[:, patch_size:].squeeze()
+        orig_signal = orig_signal[:, patch_size:].squeeze()
 
         shift_reconstruct = reconstruct[:, :-patch_size]
 
@@ -37,8 +40,14 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
 
         for i in range(signal.shape[-1]):
             ax = plt.subplot(gs[i % 6, i // 6])
-            ax.plot(shift_x[..., i].cpu().squeeze().numpy(), color=color_1)
+            ax.plot(orig_signal[..., i].cpu().squeeze().numpy(), color=color_1)
             ax.plot(shift_reconstruct[..., i].cpu().squeeze().numpy(), color=color_2)
+
+            # sometimes the signal is zeroed out by the random drop leads
+            # so here i just plot the zeroed out signal with a dashed line to know that channel was zeroed out
+            if (shift_x[..., i] != orig_signal[..., i]).any():
+                ax.plot(signal[..., i].cpu().squeeze().numpy(), color='grey', linestyle='--')
+                
             ax.set_title(leads[i])
 
             # add vertical lines avery patch size

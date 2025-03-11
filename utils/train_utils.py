@@ -30,7 +30,7 @@ def masked_min_max_loss(input, target, reduction='mean', patch_size=100):
     out = (min_inp - min_target)**2 + (max_inp - max_target)**2
 
     # do not consider elements set to 0
-    # out = out[target != 0]
+    out = out[max_target != 0]
 
     if reduction == "mean":
         return out.mean() / patch_size

@@ -31,10 +31,11 @@ class EmbeddingToPatch(nn.Module):
 
 
 class FeatureSpec(object):
-    def __init__(self, name, num_categories, dtype):
+    def __init__(self, name, num_categories, dtype, category_size=1):
         self.name = name
         self.num_categories = num_categories
         self.dtype = dtype
+        self.category_size = category_size
  
 
 class TabularEmbeddings(nn.Module):
@@ -56,17 +57,21 @@ class TabularEmbeddings(nn.Module):
     def forward(self, tab_data, batch_size):
         embeddings = []
         device = next(self.parameters()).device
-        zero_tensor = torch.zeros(batch_size, self.num_hiddens, device=device)
+        # zero_tensor = torch.zeros(batch_size, self.num_hiddens, device=device)
         # print('type of tab_data', type(tab_data))
         for feat in self.feature_specs:
             values = tab_data.get(feat.name)
             # if the data do not have the feature, we add a tensor of zeros
             if values is None:
-                embeddings.append(zero_tensor)
+                values = torch.zeros(batch_size, dtype=feat.dtype, device=device)
             else:
                 values = torch.as_tensor(values.values, dtype=feat.dtype).to(device)
-                values = values.clamp_max(feat.num_categories - 1)  # Ensure values are within range
-                embeddings.append(self.embeddings[feat.name](values))
+                values = values.clamp_max(feat.num_categories * feat.category_size - 1) // feat.category_size  # Ensure values are within range
+            # print('feat', feat.name)
+            # print('values', values)
+            # ensure type is correct: 
+            values = values.to(torch.int32)
+            embeddings.append(self.embeddings[feat.name](values))
         
         tortn = torch.stack(embeddings, dim=1) # (batch_size, num_features, num_hiddens)
         tortn = self.dropout(tortn)

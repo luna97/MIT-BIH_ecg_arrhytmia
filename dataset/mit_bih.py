@@ -11,8 +11,15 @@ conversion = {
 }
 
 class ECGMITBIHDataset(torch.utils.data.Dataset):
-
-    def __init__(self, config, subset='train', name='t_wave_split'):
+    def __init__(self, config, subset='train', name='t_wave_split', use_labels_in_tab_data=True):
+        """
+        Args:
+            config: configuration object
+            subset: 'train' or 'test'
+            name: name of the labels folder, default is 't_wave_split' so here the in the labels csv file the heartbeats will be divided by the t wave
+            use_labels_in_tab_data: if True the labels are used in the tabular data (like the rbbb, lbbb, etc)
+        """
+        
         self.data_folder = config.data_folder_mit
         self.subset = subset
         self.samples = []
@@ -23,6 +30,7 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         self.normalize = config.normalize
 
         self.leads_to_use = leads if config.leads == ['*'] else config.leads
+        self.use_labels_in_tab_data = use_labels_in_tab_data
 
         self.samples = pd.read_csv(os.path.join(self.data_folder, name, f'labels_{subset}.csv'))
         # ensure no Nan values
@@ -101,22 +109,23 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         }
 
         if self.use_tab_data:
-            comment = self.comments[int(patient)][0].split(' ')
+            comment = header.__dict__['comments'][0].split(' ')
             age = max(0, int(comment[0]))
-
             is_male = comment[1] == 'M'
 
             # create pandas row with the tabular data
-        
-            tab_data = pd.DataFrame({
+            tab_data = {
                 'age': [age],
-                'is_male': [is_male],
-                'RBBB': sample['orig_label'] == 'R',
-                'LBBB': sample['orig_label'] == 'L',
-                'SB': 'SBR' in sample['extra_annotations'],
-                'AF': 'AFIB' in sample['extra_annotations'],
-            })
-            tortn['tab_data'] = tab_data
+                'is_male': [is_male]
+            }
+            if self.use_labels_in_tab_data:
+                tab_data['RBBB'] = sample['orig_label'] == 'R'
+                tab_data['LBBB'] = sample['orig_label'] == 'L'
+                tab_data['SB'] = 'SBR' in sample['extra_annotations'] # sinus bradycardia
+                tab_data['ST'] = False
+                tab_data['AF'] = 'AFIB' in sample['extra_annotations'] # atrial fibrillation
+
+            tortn['tab_data'] = pd.DataFrame(tab_data)
 
         return tortn
     

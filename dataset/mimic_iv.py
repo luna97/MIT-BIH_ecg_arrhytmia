@@ -7,6 +7,7 @@ import numpy as np
 from dataset.generic_utils import random_shift, find_records
 from torch.utils.data import random_split
 from joblib import Parallel, delayed
+import json
 
 leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 
@@ -30,10 +31,14 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
         # get the csv file with the tabular data
         self.tab_data = pd.read_csv(self.labels_file)
         # set exam_id as index
-        self.tab_data.set_index('exam_id', inplace=True)
-        # remove trace_file, patient_id and nn_predicted_age
-        self.tab_data.drop(columns=['trace_file', 'patient_id', 'nn_predicted_age', 'death', 'timey'], inplace=True)
-        print("tabular data fields for CODE 15: ", self.tab_data.columns)
+        self.tab_data.set_index('study_id', inplace=True)
+        self.tab_data['is_male'] = self.tab_data.apply(lambda x: x['gender'] == 'M', axis=1)
+        # change type of age columns from float to int
+        self.tab_data['age'] = self.tab_data['age'].fillna(0)
+        self.tab_data['age'] = self.tab_data['age'].astype(int)
+        # remove some unised columns
+        self.tab_data.drop(columns=['file_name', 'subject_id', 'hosp_diag_hosp', 'ecg_taken_in_ed', 'gender'], inplace=True)
+        print("tabular data fields for CODE 15: ", self.tab_data.head())
 
     def __len__(self):
         return len(self.records)
@@ -57,9 +62,16 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
             std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
             signal = (signal - signal.mean(axis=(0, -1))) / std
 
-        return {
+        tortn = {
             'signal':signal,
         }
+
+        if self.use_tab_data:
+            tab_data = self.tab_data.loc[int(record)]
+            tab_data = pd.DataFrame(tab_data)
+            tortn['tab_data'] = tab_data
+        return tortn
+
     
     def split_validation_training(self, val_size_pct = 0.1):
         """
@@ -73,13 +85,3 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
         val_size = dataset_size - train_size
         train_dataset, val_dataset = random_split(self, [train_size, val_size])
         return train_dataset, val_dataset
-    
-def collate_fn(batch):
-    signals = [item['signal'] for item in batch]
-    padded_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
-
-    tortn =  {
-        'signal': padded_signals,
-    }
-
-    return tortn

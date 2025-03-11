@@ -1,0 +1,89 @@
+program: sweep_pretrain.py
+method: random
+name: pretrain-xLSTM
+metric:
+  goal: minimize
+  name: test_nrmse
+parameters:
+  pretrain:
+    value: False
+  lr_head:
+    min: 0.00001
+    max: 0.01
+  lr_xlstm:
+    min: 0.0000001
+    max: 0.001
+  wd:
+    min: 0.000001
+    max: 0.1
+  batch_size:
+    value: 128
+  num_workers:
+    value: 32
+  epochs:
+    value: 15
+  dropout:
+    min: 0.1
+    max: 0.5
+  multi_token_prediction:
+    value: False
+  use_tab_data:
+    value: False
+  optimizer:
+    value: "adamw"
+  patch_size:
+    values: 128
+  embedding_size:
+    value: 768
+  activation_fn:
+    values: 'relu'
+  xlstm_depth:
+    value: 7
+  wandb_log:
+    value: True
+  random_shift:
+    value: True
+  data_folder_mit:
+    value: '/media/Volume/data/MIT-BHI/data/'
+  use_scheduler:
+    value: False
+  num_epochs_warmup:
+    value: 2
+  num_epochs_warm_restart:
+    value: 5
+  patch_embedding:
+    value: 'linear'
+  deterministic:
+    value: True
+  is_sweep:
+    value: True
+  grad_clip:
+    value: 5
+  patience:
+    value: 10
+  nk_clean:
+    value: False
+  data_folder_code15:
+    value: '/media/Volume/data/CODE15/unlabeled_records_360'
+  normalize:
+    value: True
+  xlstm_config:
+    value: ['m', 's', 'm', 'm', 'm', 'm', 'm', 'm', 'm', 's', 'm', 'm', 'm', 'm', 'm', 'm']
+  sched_decay_factor:
+    value: 0.8
+  weight_tying:
+    value: True
+  use_class_weights:
+    value: True
+  num_heads:
+    value: 4
+  checkpoint:
+    value: 'pretrain-xLSTM/s0a50aaj/checkpoints/epoch=20-step=93870.ckpt'
+  oversample:
+    value: False
+  random_drop_leads:
+    value: 0.
+  leads
+    value: ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+
+  

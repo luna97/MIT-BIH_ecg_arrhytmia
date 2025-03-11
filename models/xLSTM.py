@@ -49,18 +49,28 @@ class myxLSTM(nn.Module):
     
         if self.use_tab_data:
             self.tab_embeddings = TabularEmbeddings([
-                FeatureSpec('age', 110, torch.int64),
+                FeatureSpec('age', 11, torch.int64, category_size=10),
                 FeatureSpec('is_male', 2, torch.bool),
-                #FeatureSpec('RBBB', 2, torch.bool),
-                #FeatureSpec('LBBB', 2, torch.bool),
-                #FeatureSpec('SB', 2, torch.bool), # Sinus Bradycardia
-                #FeatureSpec('AF', 2, torch.bool), # Atrial Fibrillation
-                # FeatureSpec('1dAVb', 2, torch.bool), # first degree AV block, not present in the mit_bih dataset
-                # #['age', 'is_male', '1dAVb', 'RBBB', 'LBBB', 'SB', 'ST', 'AF', 'normal_ecg'],
+                FeatureSpec('RBBB', 2, torch.bool),
+                FeatureSpec('LBBB', 2, torch.bool),
+                FeatureSpec('SB', 2, torch.bool), # Sinus Bradycardia
+                FeatureSpec('ST', 2, torch.bool), # Sinus Tachycardia
+                FeatureSpec('AF', 2, torch.bool), # Atrial Fibrillation
+                FeatureSpec('1dAVb', 2, torch.bool), # first degree AV block, not present in the mit_bih dataset
+                FeatureSpec('Hypertension', 2, torch.bool), # 
+                FeatureSpec('Ischaemic disease', 2, torch.bool), # 
+                FeatureSpec('Pulmonary Heart', 2, torch.bool), #
+                FeatureSpec('Cerebrovascular diseases', 2, torch.bool), #
+                FeatureSpec('Arteries diseases', 2, torch.bool), # 
+                FeatureSpec('Veins diseases', 2, torch.bool), #
+                FeatureSpec('Heart Failure', 2, torch.bool), #
+                FeatureSpec('Cardiomiopathy', 2, torch.bool), #
+                FeatureSpec('Rheumatic disease', 2, torch.bool), #
             ], num_hiddens=config.embedding_size, dropout=config.dropout)
 
-    def embed_data(self, x, tab_data):
-        x = self.random_drop_leads(x)
+    def embed_data(self, x, tab_data, random_drop_leads=True):
+        if random_drop_leads:
+            x = self.random_drop_leads(x)
 
         x = x.permute(0, 2, 1) # put the channels in the middle
         x = self.patch_embedding(x)
@@ -99,7 +109,8 @@ class myxLSTM(nn.Module):
         return x
     
     def generate(self, x, tab_data, length=10):
-        x, _ = self.embed_data(x, tab_data)
+        # i do not need to drop the leads here
+        x, _ = self.embed_data(x, tab_data, random_drop_leads=False)
 
         state = None
         for i in range(x.shape[1]):
@@ -115,7 +126,7 @@ class myxLSTM(nn.Module):
         reconstructed = [r]
 
         for i in range(length - 1):
-            x, _ = self.embed_data(r, None)
+            x, _ = self.embed_data(r, None, random_drop_leads=False)
             x, state = self.xlstm.step(x, state=state)
             if self.weight_tying:
                 r = self.patch_embedding.get_patch(x)
@@ -129,14 +140,14 @@ class myxLSTM(nn.Module):
 
 
     def forward(self, ctx, x, tab_data):
+        ctx, _ = self.embed_data(ctx, tab_data)
+        x, _ = self.embed_data(x, None)
 
-        x = x.permute(0, 2, 1) # put the channels in the middle
-        ctx = ctx.permute(0, 2, 1) # put the channels in the middle
-        ctx = self.patch_embedding(ctx)
-        x = self.patch_embedding(x)
         # add the separation token between the context and the input
         sep_token = self.sep_token.repeat(x.shape[0], 1, 1)
         x = torch.cat([ctx, sep_token, x], dim=1)
+
+        # get the last hidden state and apply the head
         x = self.xlstm(x)[:, -1, :] # [batch_size, embedding_dim]
         x = self.fc(x)
         return x
@@ -154,7 +165,7 @@ class RandomDropLeads(nn.Module):
         self.probability = probability
 
     def forward(self, signal):
-        if self.train:
+        if self.training:
             leads_to_remove = np.random.random(signal.shape[-1]) < self.probability
             leads_to_remove[1] = False  # never remove lead II
             signal[..., leads_to_remove] = 0

@@ -45,7 +45,6 @@ parser.add_argument('--sched_decay_factor', type=float, default=0.8, help='Decay
 parser.add_argument('--activation_fn', type=str, default='leakyrelu', help='Activation function')
 parser.add_argument('--xlstm_config', type=str, nargs='*', default=['m', 's', 'm', 'm', 'm', 'm', 'm'])
 parser.add_argument('--wandb_log', action='store_true', help='Log to wandb')
-parser.add_argument('--patch_embedding', type=str, default='linear', help='Patch embedding type')
 parser.add_argument('--num_heads', type=int, default=4, help='Number of heads for the mLSTM module')
 
 # data and augmentations hyperparameters
@@ -58,16 +57,15 @@ parser.add_argument('--nk_clean', action='store_true', help='Use nk_clean for th
 parser.add_argument('--leads', type=str, nargs='*', default=['II'], help='Leads to use for the dataset')
 
 # dataset folders
-parser.add_argument('--data_folder_mit', type=str, default='/media/Volume/data/MIT-BHI/data/', help='Data folder for MIT-BHI dataset')
+parser.add_argument('--data_folder_mit', type=str, default='/media/Volume/data/MIT-BHI/data/t_wave_split', help='Data folder for MIT-BHI dataset')
 parser.add_argument('--data_folder_code15', type=str, default='/media/Volume/data/CODE15/nkclean_360_12l', help='Data folder for code15 dataset')
 parser.add_argument('--labels_file_code15', type=str, default='/media/Volume/data/CODE15/exams.csv', help='Labels file for code15 dataset')
 parser.add_argument('--data_folder_mimic', type=str, default='/media/Volume/data/MIMIC_IV/nkclean_360_12l', help='Data folder for MIMIC dataset')
-parser.add_argument('--labels_file_mimic', type=str, default='/media/Volume/data/MIMIC_IV/records_w_diag_icd10.csv', help='Labels file for MIMIC dataset')
+parser.add_argument('--labels_file_mimic', type=str, default='/media/Volume/data/MIMIC_IV/records_w_diag_icd10_labelled.csv', help='Labels file for MIMIC dataset')
 
 def pretrain(config, run=None, wandb=False):
-
-    if config.deterministic:
-        L.seed_everything(42)
+    # set deterministic training
+    if config.deterministic: L.seed_everything(42)
 
     datasets_pretrain = []
 

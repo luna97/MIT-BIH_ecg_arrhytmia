@@ -130,7 +130,7 @@ if __name__ == '__main__':
     if args.dataset == 'mimic':
         records = pd.read_csv(args.label_file)
         Parallel(n_jobs=-1)(delayed(process_sample_mimic)(sample) for i, sample in tqdm(records.iterrows()))
-        process_csv_file_mimic(args.label_file, os.path.join(args.output_folder, 'records_w_diag_icd10_labelled.csv')))
+        process_csv_file_mimic(args.label_file, os.path.join(args.output_folder, 'records_w_diag_icd10_labelled.csv'))
 
     if args.dataset == 'code15':
         exams = pd.read_csv(args.label_file)

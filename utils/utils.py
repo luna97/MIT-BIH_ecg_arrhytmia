@@ -108,12 +108,16 @@ def get_datasets(args, train_transform, data_dir):
 
   return train_dataset, val_dataset, test_dataset
 
-def get_training_class_weights(train_dataset):
+def get_training_class_weights(train_dataset, do_not_consider_classes = []):
   """
   Returns the class weights for the training dataset.
   """
   # 2. Instantiate Model, Loss, and Optimizer
   labels = [sample['label'] for sample in train_dataset]
+
+  # remove classes that should not be considered
+  labels = [label for label in labels if label not in do_not_consider_classes]
+  
   # labels = train_dataset.get_labels()
   class_counts = Counter(labels)
   print(f"Class Counts: {class_counts}")

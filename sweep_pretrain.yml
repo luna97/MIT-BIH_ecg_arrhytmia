@@ -39,8 +39,7 @@ parameters:
     value: 8
   use_scheduler:
     value: True
-  multi_token_prediction: 
-    value: True
+
   loss_type:
     value: 'grad'
   num_epochs_warmup:

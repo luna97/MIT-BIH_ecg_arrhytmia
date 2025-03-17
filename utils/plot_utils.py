@@ -18,7 +18,11 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
         if len(signal.shape) == 2:
             signal = signal.unsqueeze(-1)
         
-        reconstruct = model.reconstruct(signal, tab_data) # [batch_size, seq_len // 64, patch_size]
+        if model.use_mean_var_head:
+            reconstruct, _, _ = model.reconstruct(signal, tab_data) 
+        else:
+            reconstruct = model.reconstruct(signal, tab_data)
+            
         # if reconstruct is a tuple, get the first element
         if isinstance(reconstruct, tuple):
             reconstruct = reconstruct[0]
@@ -45,8 +49,10 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
 
             # sometimes the signal is zeroed out by the random drop leads
             # so here i just plot the zeroed out signal with a dashed line to know that channel was zeroed out
+            has_augmentation = False
             if (shift_x[..., i] != orig_signal[..., i]).any():
-                ax.plot(signal[..., i].cpu().squeeze().numpy(), color='grey', linestyle='--')
+                ax.plot(signal[..., patch_size:reconstruct.shape[1], i].cpu().squeeze().numpy(), color='grey', linestyle='--')
+                has_augmentation = True
                 
             ax.set_title(leads[i])
 
@@ -56,7 +62,10 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
 
             ax.set_yticks([])
             if i == 0:
-                ax.legend(['Original', 'Reconstructed'], loc='upper left')
+                if has_augmentation:
+                    ax.legend(['Original', 'Reconstructed', 'Augmented'], loc='upper left')
+                else:
+                    ax.legend(['Original', 'Reconstructed'], loc='upper left')
 
             if i == 5 or i == 11:
                 ax.set_xticks(np.arange(0, len(shift_x[0]), 360))

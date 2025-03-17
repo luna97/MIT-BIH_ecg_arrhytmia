@@ -14,9 +14,9 @@ def masked_min_max_loss(input, target, reduction='mean', patch_size=100):
     batch_size, sig_len, num_channels = input.shape
     #print('batch_size', batch_size)
     #print('sig_len', sig_len)
-
-    tokenized_inp = input.view(batch_size, sig_len // patch_size, patch_size, num_channels)
-    tokenized_target = target.view(batch_size, sig_len // patch_size, patch_size, num_channels)   
+    tokens_num = sig_len // patch_size
+    tokenized_inp = input.view(batch_size, tokens_num, patch_size, num_channels)
+    tokenized_target = target.view(batch_size, tokens_num, patch_size, num_channels)   
     # find the min and max value of each patch
     min_inp, _ = tokenized_inp.min(dim=-1)
     # print('min_inp', min_inp.shape)
@@ -33,9 +33,9 @@ def masked_min_max_loss(input, target, reduction='mean', patch_size=100):
     out = out[max_target != 0]
 
     if reduction == "mean":
-        return out.mean() / patch_size
+        return out.mean() / tokens_num
     elif reduction == "none":
-        return out / patch_size
+        return out / tokens_num
 
 def masked_mae_loss(input, target, reduction='mean'):
     out = torch.abs(input-target)

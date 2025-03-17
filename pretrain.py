@@ -7,11 +7,11 @@ import dataset.mit_bih as mit_bih
 import dataset.code_15 as code_15
 import dataset.mimic_iv as mimic
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
-from trainer import PretrainedxLSTMNetwork
+from trainers.ssl_pretrainer import PretrainedxLSTMNetwork
 import sys
 
 
-# pretrain.py --epochs 100 --dropout 0.4 --activation_fn relu --batch_size 512 --patch_size 128 --embedding_size 784 --use_scheduler --lr 0.0005 --wd 0.1 --multi_token_prediction --data_folder_code15 /media/Volume/data/CODE15/unlabeled_records_360_nkclean --deterministic --xlstm_config m s m m m m --loss_type grad --pretrain_with_code15 --num_workers 32 --normalize --wandb_log --nk_clean
+# pretrain.py --epochs 100 --dropout 0.4 --activation_fn relu --batch_size 512 --patch_size 128 --embedding_size 784 --use_scheduler --lr 0.0005 --wd 0.1 --data_folder_code15 /media/Volume/data/CODE15/unlabeled_records_360_nkclean --deterministic --xlstm_config m s m m m m --loss_type grad --pretrain_with_code15 --num_workers 32 --normalize --wandb_log --nk_clean
 
 # argparse
 import argparse
@@ -25,7 +25,6 @@ parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
 parser.add_argument('--patch_size', type=int, default=64, help='Patch size')
 parser.add_argument('--dropout', type=float, default=0.3, help='Dropout')
 parser.add_argument('--embedding_size', type=int, default=64, help='Embedding size')
-parser.add_argument('--multi_token_prediction', action='store_true', help='Multi token prediction')
 parser.add_argument('--loss_type', type=str, default='mse', help='Loss type')
 parser.add_argument('--deterministic', action='store_true', help='Deterministic training')
 parser.add_argument('--use_tab_data', action='store_true', help='Use tabular data')
@@ -52,12 +51,14 @@ parser.add_argument('--normalize', action='store_true', help='Normalize the data
 parser.add_argument('--oversample', action='store_true', help='Oversample the data for the training set')
 parser.add_argument('--random_shift', action='store_true', help='Random shift the data on the training set')
 parser.add_argument('--random_drop_leads', type=float, default=0, help='Randomly drop leads')
+parser.add_argument('--random_surrogate_prob', type=float, default=0, help='Random noise')
+parser.add_argument('--random_jitter_prob', type=float, default=0, help='Random jitter')
 parser.add_argument('--pretrain_datasets', type=str, nargs='*', default=['mimic', 'code15'], help='Datasets to use for pretraining')
 parser.add_argument('--nk_clean', action='store_true', help='Use nk_clean for the code15 dataset')
 parser.add_argument('--leads', type=str, nargs='*', default=['II'], help='Leads to use for the dataset')
 
 # dataset folders
-parser.add_argument('--data_folder_mit', type=str, default='/media/Volume/data/MIT-BHI/data/t_wave_split', help='Data folder for MIT-BHI dataset')
+parser.add_argument('--data_folder_mit', type=str, default='/media/Volume/data/MIT-BHI/data', help='Data folder for MIT-BHI dataset')
 parser.add_argument('--data_folder_code15', type=str, default='/media/Volume/data/CODE15/nkclean_360_12l', help='Data folder for code15 dataset')
 parser.add_argument('--labels_file_code15', type=str, default='/media/Volume/data/CODE15/exams.csv', help='Labels file for code15 dataset')
 parser.add_argument('--data_folder_mimic', type=str, default='/media/Volume/data/MIMIC_IV/nkclean_360_12l', help='Data folder for MIMIC dataset')
@@ -77,7 +78,7 @@ def pretrain(config, run=None, wandb=False):
         else:
             raise ValueError(f"Dataset {dataset} not found")
 
-    val_dataset = mit_bih.ECGMITBIHDataset(config, subset='train')
+    val_dataset = mit_bih.ECGMITBIHDataset(config, subset='train', random_shift=False)
 
     train_dataset = utils.data.ConcatDataset(datasets_pretrain)
     train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=code_15.collate_fn)
@@ -87,7 +88,7 @@ def pretrain(config, run=None, wandb=False):
     val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn)
 
     len_train_dataset = len(train_dataset)
-    test_dataset = mit_bih.ECGMITBIHDataset(config, subset='test')
+    test_dataset = mit_bih.ECGMITBIHDataset(config, subset='test', random_shift=False)
     test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
     
     xlstm = myxLSTM(config=config, num_classes=5, num_channels=len(config.leads))
@@ -100,6 +101,7 @@ def pretrain(config, run=None, wandb=False):
 
     if wandb:
         wand_logger = WandbLogger(project="pretrain-xLSTM", experiment=run)
+        wand_logger.watch(model, log='all')
         trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[checkpoint_callback, lr_monitor, early_stopping], gradient_clip_val=config.grad_clip)
     else:
         trainer = L.Trainer(max_epochs=config.epochs, callbacks=[checkpoint_callback, lr_monitor, early_stopping], gradient_clip_val=config.grad_clip)

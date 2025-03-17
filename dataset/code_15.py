@@ -4,7 +4,7 @@ import numpy as np
 import wfdb
 import os
 import pandas as pd
-from dataset.generic_utils import random_shift, find_records
+from dataset.generic_utils import random_shift, find_records, check_mean_var_r_peaks
 
 leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 
@@ -24,8 +24,7 @@ class ECGCODE15Dataset(Dataset):
         self.patch_size = config.patch_size
         self.use_tab_data = config.use_tab_data
         
-        if self.use_tab_data:
-            self.load_tabular_data()
+        self.load_tabular_data()
 
     def load_tabular_data(self):
         # get the csv file with the tabular data
@@ -59,23 +58,23 @@ class ECGCODE15Dataset(Dataset):
             # keep the selected leads
             signal = signal[:, [leads.index(lead) for lead in self.leads]].squeeze()
             
-        # print('code15', signal.shape)
-
         # normalize the signal by subtracting the mean and dividing by the standard deviation
         if self.normalize:
             std = signal.std(axis=(0, -1))
             std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
             signal = (signal - signal.mean(axis=(0, -1))) / std
 
+        tab_data = self.tab_data.loc[int(record.split('/')[0])]
+
         tortn = {
-            'signal':signal
+            'signal':signal,
+            'r_peak_interval_mean': torch.tensor(tab_data['r_peak_interval_mean']),
+            'r_peak_variance': torch.tensor(tab_data['r_peak_variance']),
         }
-        # print('code15', signal.shape)
+
+        tortn = check_mean_var_r_peaks(tortn)
 
         if self.use_tab_data:
-            
-            tab_data = self.tab_data.loc[int(record.split('/')[0])]
-            # to dataframe
             tab_data = pd.DataFrame(tab_data)
             tortn['tab_data'] = tab_data
         
@@ -98,9 +97,13 @@ class ECGCODE15Dataset(Dataset):
 def collate_fn(batch):
     signals = [item['signal'] for item in batch]
     padded_signals = torch.nn.utils.rnn.pad_sequence(signals, batch_first=True)
+    r_peak_interval_mean = torch.tensor([item['r_peak_interval_mean'] for item in batch]) 
+    r_peak_variance = torch.tensor([item['r_peak_variance'] for item in batch])
         
     tortn =  {
         'signal': padded_signals,
+        'r_peak_interval_mean': r_peak_interval_mean,
+        'r_peak_variance': r_peak_variance,
     }
 
     if 'tab_data' in batch[0].keys():

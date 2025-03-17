@@ -4,10 +4,12 @@ import pandas as pd
 import wfdb
 import neurokit2 as nk
 import numpy as np
-from dataset.generic_utils import random_shift, find_records
+from dataset.generic_utils import random_shift, find_records, check_mean_var_r_peaks
 from torch.utils.data import random_split
 from joblib import Parallel, delayed
 import json
+from pandarallel import pandarallel
+pandarallel.initialize(progress_bar=False)
 
 leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 
@@ -24,15 +26,14 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
         self.labels_file = config.labels_file_mimic
         self.records = find_records(config.data_folder_mimic)
         print(f'loaded {len(self.records)} records') 
-        if self.use_tab_data:
-            self.load_tabular_data()
+        self.load_tabular_data()
 
     def load_tabular_data(self):
         # get the csv file with the tabular data
         self.tab_data = pd.read_csv(self.labels_file)
         # set exam_id as index
         self.tab_data.set_index('study_id', inplace=True)
-        self.tab_data['is_male'] = self.tab_data.apply(lambda x: x['gender'] == 'M', axis=1)
+        self.tab_data['is_male'] = self.tab_data.parallel_apply(lambda x: x['gender'] == 'M', axis=1)
         # change type of age columns from float to int
         self.tab_data['age'] = self.tab_data['age'].fillna(0)
         self.tab_data['age'] = self.tab_data['age'].astype(int)
@@ -62,12 +63,17 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
             std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
             signal = (signal - signal.mean(axis=(0, -1))) / std
 
+        tab_data = self.tab_data.loc[int(record)]
+
         tortn = {
             'signal':signal,
+            'r_peak_interval_mean': torch.tensor(tab_data['r_peak_interval_mean']),
+            'r_peak_variance': torch.tensor(tab_data['r_peak_variance']),
         }
 
+        tortn = check_mean_var_r_peaks(tortn)
+         
         if self.use_tab_data:
-            tab_data = self.tab_data.loc[int(record)]
             tab_data = pd.DataFrame(tab_data)
             tortn['tab_data'] = tab_data
         return tortn

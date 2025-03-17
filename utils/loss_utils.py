@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def contrastive_coupled_loss(outputs, labels, patient_ids, class_weights, margin=.1):
+def contrastive_coupled_loss(outputs, labels, patient_ids, class_weights=None, margin=.1):
     """
     Computes the contrastive coupled loss for a batch of embeddings.
 
@@ -51,9 +51,12 @@ def contrastive_coupled_loss(outputs, labels, patient_ids, class_weights, margin
     # get the matrix for same label (1) and different label (0)
     label_matrix = (labels.unsqueeze(0) == labels.unsqueeze(1)).float().to(outputs.device)
     # apply class weights in both dimensions
-    # weight_matrix = class_weights[labels].unsqueeze(1) * class_weights[labels].unsqueeze(0)
+    if class_weights is not None:
+        weight_matrix = class_weights[labels].unsqueeze(1) * class_weights[labels].unsqueeze(0)
+    else:
+        weight_matrix = torch.ones_like(label_matrix)
 
-    positive_loss = torch.clamp(margin - similarity_matrix, min=0) * label_matrix # * weight_matrix # Positive pairs: maximize similarity
+    positive_loss = torch.clamp(margin - similarity_matrix, min=0) * label_matrix * weight_matrix # Positive pairs: maximize similarity
     negative_loss = torch.clamp(similarity_matrix + margin, min=0) * (1 - label_matrix)  # Negative pairs: minimize similarity
 
     # maximize the similarity between same label and minimize the similarity between different labels

@@ -2,8 +2,9 @@ import torch
 from torch import nn
 
 from models.utils import get_activation_fn, get_xlstm
-from models.PatchEmbedding import TabularEmbeddings, PatchEmbedding, FeatureSpec, EmbeddingToPatch
+from models.modules import TabularEmbeddings, PatchEmbedding, FeatureSpec, EmbedPatching, HeadModule
 from models.SeriesDecomposition import SeriesDecomposition 
+from augmentations import RandomDropLeads, FTSurrogate, Jitter
 import numpy as np
 
 class myxLSTM(nn.Module):
@@ -17,35 +18,59 @@ class myxLSTM(nn.Module):
         super(myxLSTM, self).__init__()
         self.dropout = nn.Dropout(config.dropout)
         self.patch_size = config.patch_size
-        self.multi_token_prediction = config.multi_token_prediction
         self.use_tab_data = config.use_tab_data
         self.weight_tying = config.weight_tying
+
 
 
         self.activation = get_activation_fn(config.activation_fn)
 
         self.patch_embedding = PatchEmbedding(patch_size=config.patch_size, num_hiddens=config.embedding_size)
-
         self.sep_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
 
         self.xlstm = get_xlstm(config.embedding_size, dropout=config.dropout, blocks=config.xlstm_config, num_heads=config.num_heads)
 
         self.random_drop_leads = RandomDropLeads(config.random_drop_leads)
+        self.random_surrogate = FTSurrogate(0.05, prob=config.random_surrogate_prob)
+        self.random_jitter = Jitter(sigma=0.1, prob=config.random_jitter_prob)
 
-        self.fc = nn.Sequential(
-            nn.Linear(config.embedding_size, config.embedding_size // 2),
-            self.activation,
-            nn.Linear(config.embedding_size // 2, num_classes),
+        self.fc = HeadModule(
+            inp_size=config.embedding_size,
+            hidden_size=config.embedding_size // 2, 
+            out_size=num_classes, 
+            dropout=config.dropout, 
+            activation_fn=config.activation_fn
         )
 
-        if not self.weight_tying:
-            if not self.multi_token_prediction:
-                self.reconstruction = HeadModule(config.embedding_size, config.patch_size, num_channels, config.dropout)
-            else:
-                self.rec1 = HeadModule(config.embedding_size, config.patch_size, num_channels, config.dropout)
-                self.rec2 = HeadModule(config.embedding_size, config.patch_size, num_channels, config.dropout)
-                self.rec3 = HeadModule(config.embedding_size, config.patch_size, num_channels, config.dropout)
-                self.rec4 = HeadModule(config.embedding_size, config.patch_size, num_channels, config.dropout)
+        self.use_mean_var_head = 'mean_var' in config.loss_type
+
+        if self.use_mean_var_head:
+            self.variance_head = HeadModule(
+                inp_size=config.embedding_size, 
+                hidden_size=config.embedding_size // 2,
+                out_size=1, 
+                dropout=config.dropout,
+                activation_fn=config.activation_fn
+            )
+            self.mean_head = HeadModule(
+                inp_size=config.embedding_size, 
+                hidden_size=config.embedding_size // 2, 
+                out_size=1, 
+                dropout=config.dropout,
+                activation_fn=config.activation_fn
+            )
+
+        self.reconstruction = EmbedPatching(
+            patch_size=config.patch_size, 
+            num_hiddens=config.embedding_size, 
+            num_channels=len(config.leads), 
+            activation_fn=config.activation_fn, 
+            use_pre_head=True
+        )
+
+        if self.weight_tying: self.reconstruction.deconv.weight = self.patch_embedding.conv.weight
+
     
         if self.use_tab_data:
             self.tab_embeddings = TabularEmbeddings([
@@ -68,9 +93,11 @@ class myxLSTM(nn.Module):
                 FeatureSpec('Rheumatic disease', 2, torch.bool), #
             ], num_hiddens=config.embedding_size, dropout=config.dropout)
 
-    def embed_data(self, x, tab_data, random_drop_leads=True):
-        if random_drop_leads:
+    def embed_data(self, x, tab_data, augment=True):
+        if augment:
             x = self.random_drop_leads(x)
+            x = self.random_surrogate(x)
+            x = self.random_jitter(x)
 
         x = x.permute(0, 2, 1) # put the channels in the middle
         x = self.patch_embedding(x)
@@ -93,47 +120,33 @@ class myxLSTM(nn.Module):
         if self.use_tab_data:
             # remove the tabular data
             x = x[:, tab_embeddings:, :]
+        
+        r = self.reconstruction(x)
 
-        if self.weight_tying:
-            x = self.patch_embedding.get_patch(x)
-            return x
-        
-        if self.multi_token_prediction:
-            x1 = self.rec1(x)
-            x2 = self.rec2(x)
-            x3 = self.rec3(x)
-            x4 = self.rec4(x)
-            return x1, x2, x3, x4
-        
-        x = self.reconstruction(x)
-        return x
+        if self.use_mean_var_head:
+            mean = self.mean_head(x[:, -1, :])
+            variance = self.variance_head(x[:, -1, :])
+            return r, mean, variance
+    
+        return r
     
     def generate(self, x, tab_data, length=10):
         # i do not need to drop the leads here
-        x, _ = self.embed_data(x, tab_data, random_drop_leads=False)
+        x, _ = self.embed_data(x, tab_data, augment=False)
 
         state = None
         for i in range(x.shape[1]):
             new_x, state = self.xlstm.step(x[:, i].unsqueeze(1), state=state)
 
-        if self.weight_tying:
-            r = self.patch_embedding.get_patch(new_x)
-        elif self.multi_token_prediction:
-            r = self.rec1(new_x)
-        else:
-            r = self.reconstruction(new_x)
+        r = self.reconstruction(new_x)
 
         reconstructed = [r]
 
         for i in range(length - 1):
-            x, _ = self.embed_data(r, None, random_drop_leads=False)
+            x, _ = self.embed_data(r, None, augment=False)
             x, state = self.xlstm.step(x, state=state)
-            if self.weight_tying:
-                r = self.patch_embedding.get_patch(x)
-            elif self.multi_token_prediction:
-                r = self.rec1(x)
-            else:
-                r = self.patch_embedding.get_patch(x)
+            r = self.reconstruction(x)
+
             reconstructed.append(r)
         
         return torch.cat(reconstructed, dim=1)
@@ -145,12 +158,14 @@ class myxLSTM(nn.Module):
 
         # add the separation token between the context and the input
         sep_token = self.sep_token.repeat(x.shape[0], 1, 1)
-        x = torch.cat([ctx, sep_token, x], dim=1)
-
+        cls_token = self.cls_token.repeat(x.shape[0], 1, 1)
+        x = torch.cat([ctx, sep_token, x, cls_token], dim=1)
         # get the last hidden state and apply the head
-        x = self.xlstm(x)[:, -1, :] # [batch_size, embedding_dim]
-        x = self.fc(x)
-        return x
+        x = self.xlstm(x) # [batch_size, embedding_dim]
+        
+        cls_token = x[:, -1, :]
+        x = self.fc(cls_token)
+        return x, cls_token
 
     def trainable_parameters(self):
         return self.parameters()
@@ -158,31 +173,3 @@ class myxLSTM(nn.Module):
     def head_parameters(self):
         return self.fc.parameters() 
     
-
-class RandomDropLeads(nn.Module):
-    def __init__(self, probability=0.5):
-        super(RandomDropLeads, self).__init__()
-        self.probability = probability
-
-    def forward(self, signal):
-        if self.training:
-            leads_to_remove = np.random.random(signal.shape[-1]) < self.probability
-            leads_to_remove[1] = False  # never remove lead II
-            signal[..., leads_to_remove] = 0
-        return signal
-    
-class HeadModule(nn.Module):
-    def __init__(self, in_features, out_features, num_channels=1, dropout=0.3):
-        super(HeadModule, self).__init__()
-        self.num_channels = num_channels 
-        self.fc = nn.Sequential(
-            nn.Linear(in_features, in_features // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(in_features // 2, out_features * num_channels),
-        )
-
-    def forward(self, x):
-        x = self.fc(x) # [batch_size, patch_size, out_dim * num_channels]
-        x = x.view(x.shape[0], -1, self.num_channels) # [batch_size, seq_len, num_channels]
-        return x

@@ -20,7 +20,7 @@ parameters:
   epochs:
     value: 15
   dropout:
-    min: 0.2
+    value: 0.2
   use_tab_data:
     value: False
   optimizer:
@@ -72,8 +72,13 @@ parameters:
   oversample:
     value: False
   random_drop_leads:
-    value: 0.
+    value: 0.2
   leads:
     value: ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
   contrastive_loss_lambda:
     values: [0., 0.1, 1.0, 3.0, 10.0]
+  random_jitter_prob:
+    value: 0.3
+  random_surrogate_prob:
+    value: 0.3
+  

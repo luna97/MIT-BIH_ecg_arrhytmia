@@ -59,17 +59,14 @@ class TabularEmbeddings(nn.Module):
         # print('type of tab_data', type(tab_data))
         for feat in self.feature_specs:
             values = tab_data.get(feat.name)
-            # if the data do not have the feature, we add a tensor of zeros
-            if values is None:
-                values = torch.zeros(batch_size, dtype=feat.dtype, device=device)
-            else:
+            if values is not None and not (values == 0).all():
                 values = torch.as_tensor(values.values, dtype=feat.dtype).to(device)
                 values = values.clamp_max(feat.num_categories * feat.category_size - 1) // feat.category_size  # Ensure values are within range
-            # print('feat', feat.name)
-            # print('values', values)
-            # ensure type is correct: 
-            values = values.to(torch.int32)
-            embeddings.append(self.embeddings[feat.name](values))
+                # print('feat', feat.name)
+                # print('values', values)
+                # ensure type is correct: 
+                values = values.to(torch.int32)
+                embeddings.append(self.embeddings[feat.name](values))
         
         tortn = torch.stack(embeddings, dim=1) # (batch_size, num_features, num_hiddens)
         tortn = self.dropout(tortn)

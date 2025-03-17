@@ -17,6 +17,7 @@ pandarallel.initialize(progress_bar=True)
 
 parser = argparse.ArgumentParser(description='Create dataset for MIT-BIH')
 parser.add_argument('--data_folder', type=str, default='/media/Volume/data/MIMIC_IV/', help='Path to raw data folder')
+parser.add_argument('--label_file', type=str, default='/media/Volume/data/MIMIC_IV/records_w_diag_icd10.csv', help='Path to the label file')
 parser.add_argument('--nk_clean', action='store_true', help='Use NeuroKit2 to clean the data')
 parser.add_argument('--output_folder', type=str, required=True, help='the name of the output directory')
 parser.add_argument('--dataset', type=str, required=True, help='the name of the dataset: mimic or code 15')
@@ -127,13 +128,13 @@ if __name__ == '__main__':
     clean_and_create_directory(args.output_folder)
 
     if args.dataset == 'mimic':
-        records = pd.read_csv(os.path.join(args.data_folder, 'machine_measurements.csv'))
+        records = pd.read_csv(args.label_file)
         Parallel(n_jobs=-1)(delayed(process_sample_mimic)(sample) for i, sample in tqdm(records.iterrows()))
-        process_csv_file_mimic(os.path.join(args.data_folder, 'records_w_diag_icd10.csv', os.path.join(args.output_folder, 'records_w_diag_icd10_labelled.csv')))
+        process_csv_file_mimic(args.label_file, os.path.join(args.output_folder, 'records_w_diag_icd10_labelled.csv')))
 
     if args.dataset == 'code15':
-        exams = pd.read_csv(os.path.join(args.data_folder, 'exams.csv'))
+        exams = pd.read_csv(args.label_file)
         Parallel(n_jobs=-1)(delayed(process_sample_code15)(exam) for exam in tqdm(exams.iterrows()))
-        process_csv_file_code15(os.path.join(args.data_folder, 'exams.csv'), os.path.join(args.output_folder, 'exams_labelled.csv'))
+        process_csv_file_code15(args.label_file, os.path.join(args.output_folder, 'exams_labelled.csv'))
 
 

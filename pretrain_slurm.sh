@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --mem-per-cpu=1G
 #SBATCH --time=1-00:00:00
-#SBATCH -o ./slurm_output_%j_%x.out # STDOUT
+#SBATCH -o ./logs/slurm_output_%j_%x.out # STDOUT
 
 source /home/$USER/.bashrc
 conda activate xlstm_pretrained

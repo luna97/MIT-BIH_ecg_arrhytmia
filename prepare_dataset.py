@@ -71,14 +71,14 @@ def analyze_ecg(path):
     peaks = wp.xqrs_detect(record.p_signal[:, 1], record.fs, verbose=False)
     return peaks
 
-def add_signal_informations(exams):
+def add_signal_informations(exams, identifier_key='study_id'):
     """
     Add some signal informations to the exams dataframe like r peak frequency and variance
 
     :param exams: the exams dataframe
     :return: the exams dataframe with the peaks informations
     """
-    exams['r_peaks'] = exams.parallel_apply(lambda row: analyze_ecg(os.path.join(args.output_folder, str(row['study_id']))), axis=1)
+    exams['r_peaks'] = exams.parallel_apply(lambda row: analyze_ecg(os.path.join(args.output_folder, str(row[identifier_key]))), axis=1)
     exams['r_peak_interval_mean'] = exams.parallel_apply(lambda row: np.mean((row['r_peaks'][1:] - row['r_peaks'][:-1]) / 360) if row['r_peaks'] is not None else None, axis=1)
     exams['r_peak_variance'] = exams.parallel_apply(lambda row: np.std((row['r_peaks'][1:] - row['r_peaks'][:-1]) / 360) if row['r_peaks'] is not None else None, axis=1)
     return exams
@@ -98,7 +98,7 @@ def process_csv_file_mimic(csv_file, out_csv_file):
     exams.drop(columns=['ecg_no_within_stay', 'ecg_no_within_stay', 'ecg_taken_in_hosp', 'ecg_taken_in_ed_or_hosp', 'anchor_year', 'anchor_age'], inplace=True)
     
     exams = add_labels_mimic(exams)
-    exams = add_signal_informations(exams)
+    exams = add_signal_informations(exams, identifier_key='study_id')
 
     exams.to_csv(out_csv_file)
 
@@ -112,7 +112,7 @@ def process_csv_file_code15(csv_file, out_csv_file):
     """
     exams = pd.read_csv(csv_file)
 
-    exams = add_signal_informations(exams)
+    exams = add_signal_informations(exams, identifier_key='exam_id')
     exams.to_csv(out_csv_file)      
 
 
@@ -128,7 +128,7 @@ if __name__ == '__main__':
     clean_and_create_directory(args.output_folder)
 
     if args.dataset == 'mimic':
-        records = pd.read_csv(args.label_file)
+        records = pd.read_csv(os.path.join(args.data_folder, 'machine_measurements.csv'))
         Parallel(n_jobs=-1)(delayed(process_sample_mimic)(sample) for i, sample in tqdm(records.iterrows()))
         process_csv_file_mimic(args.label_file, os.path.join(args.output_folder, 'records_w_diag_icd10_labelled.csv'))
 

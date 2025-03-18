@@ -12,7 +12,7 @@ parameters:
   lr_xlstm:
     value: 0.00001
   wd:
-    value: 0.001
+    value: 0.1
   batch_size:
     value: 128
   num_workers:
@@ -20,7 +20,8 @@ parameters:
   epochs:
     value: 15
   dropout:
-    value: 0.2
+    min: 0.1
+    max: 0.6
   use_tab_data:
     value: False
   optimizer:
@@ -34,15 +35,15 @@ parameters:
   wandb_log:
     value: True
   random_shift:
-    value: True
+    values: [True, False]
   data_folder_mit:
     value: '/media/Volume/data/MIT-BHI/data/'
   use_scheduler:
     value: True
   num_epochs_warmup:
-    value: 2
+    value: 1
   num_epochs_warm_restart:
-    value: 20
+    value: 15
   deterministic:
     value: True
   is_sweep:
@@ -72,13 +73,14 @@ parameters:
   oversample:
     value: False
   random_drop_leads:
-    value: 0.2
+    values: [0., 0.1, 0.2, 0.5]
   leads:
     value: ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
   contrastive_loss_lambda:
     values: [0., 0.1, 1.0, 3.0, 10.0]
   random_jitter_prob:
-    value: 0.3
+    values: [0., 0.1, 0.2, 0.5]
   random_surrogate_prob:
-    value: 0.3
-  
+    values: [0., 0.1, 0.2, 0.5]
+  loss_type:
+    value: ''

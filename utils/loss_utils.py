@@ -31,9 +31,7 @@ def contrastive_coupled_loss(outputs, labels, patient_ids, class_weights=None, m
     Returns:
         torch.Tensor: The computed contrastive coupled loss.
     """
-    outputs = F.normalize(outputs, p=2, dim=1) # Normalize embeddings
-    # outer product on the outputs to get cosine similarity
-    similarity_matrix = torch.mm(outputs, outputs.t()) - torch.eye(outputs.size(0)).to(outputs.device)
+    similarity_matrix = get_euclidean_distance_matrix(outputs)
     # create a matrix where the same patient has a 0 and different patients have a 1
     patient_matrix = (patient_ids.unsqueeze(0) != patient_ids.unsqueeze(1)).float().to(outputs.device) 
 
@@ -62,6 +60,34 @@ def contrastive_coupled_loss(outputs, labels, patient_ids, class_weights=None, m
     # maximize the similarity between same label and minimize the similarity between different labels
     loss = (positive_loss + negative_loss).sum(dim=1).mean()
     return loss
+
+def get_cosine_similarity_matrix(outputs):
+    """
+    Computes the cosine similarity matrix for the given outputs.
+
+    Args:
+        outputs (torch.Tensor): The input tensor containing the embeddings.
+
+    Returns:
+        torch.Tensor: The computed cosine similarity matrix.
+    """
+    outputs = F.normalize(outputs, p=2, dim=1) # Normalize embeddings
+    similarity_matrix = torch.mm(outputs, outputs.t())
+    return similarity_matrix
+
+def get_euclidean_distance_matrix(outputs):
+    """
+    Computes the euclidean distance matrix for the given outputs.
+
+    Args:
+        outputs (torch.Tensor): The input tensor containing the embeddings.
+
+    Returns:
+        torch.Tensor: The computed euclidean distance matrix.
+    """
+    distance_matrix = torch.cdist(outputs, outputs, p=2)
+    return distance_matrix
+
 
 def sparsity_loss(outputs, k=0.1, p=2):
     """

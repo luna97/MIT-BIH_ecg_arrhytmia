@@ -92,16 +92,16 @@ def train(config, run=None, wandb=False):
 
     model = TrainingxLSTMNetwork(model=xlstm, config=config, len_train_dataset=len(train_dataset), num_classes=5, weights=weights)
 
-    checkpoint_callback = ModelCheckpoint(monitor='val_f1', mode='max')
+    # checkpoint_callback = ModelCheckpoint(monitor='val_f1', mode='max')
     early_stopping = EarlyStopping(monitor='val_f1', patience=config.patience, mode='max')
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
 
     if wandb:
         wand_logger = WandbLogger(project="train-xLSTM", experiment=run)
-        trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[checkpoint_callback, early_stopping, lr_monitor], gradient_clip_val=config.grad_clip)
+        trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[early_stopping, lr_monitor], gradient_clip_val=config.grad_clip)
     else:
-        trainer = L.Trainer(max_epochs=config.epochs, callbacks=[checkpoint_callback, early_stopping, lr_monitor], gradient_clip_val=config.grad_clip)
+        trainer = L.Trainer(max_epochs=config.epochs, callbacks=[early_stopping, lr_monitor], gradient_clip_val=config.grad_clip)
 
     trainer.fit(model=model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
     trainer.test(model=model, dataloaders=test_dataloader)

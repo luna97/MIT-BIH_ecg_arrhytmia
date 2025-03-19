@@ -9,6 +9,7 @@
 #SBATCH -o ./logs/slurm_output_%j_%x.out # STDOUT
 
 source /home/$USER/.bashrc
+conda init
 conda activate xlstm_pretrained
 
 

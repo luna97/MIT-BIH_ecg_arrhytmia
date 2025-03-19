@@ -63,6 +63,7 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
             std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
             signal = (signal - signal.mean(axis=(0, -1))) / std
 
+        if '/' in str(record): record = record.split('/')[0]
         tab_data = self.tab_data.loc[int(record)]
 
         tortn = {

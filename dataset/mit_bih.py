@@ -110,7 +110,7 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             'heartbeat': heartbeat_signal,
             'signal': window_signal,
             'label': self.get_label_int(sample['label']),
-            'r_peak_interval_mean': torch.tensor(sample['r_peaks_interval_mean']),
+            'r_peak_interval_mean': torch.tensor(sample['r_peak_interval_mean']),
             'r_peak_variance' : torch.tensor(sample['r_peak_variance']),
             'patient_id': patient,
         }

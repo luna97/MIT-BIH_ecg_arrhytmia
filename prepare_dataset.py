@@ -12,6 +12,7 @@ from joblib import Parallel, delayed
 import json
 import wfdb.processing as wp
 from pandarallel import pandarallel
+from dataset.generic_utils import get_max_n_jobs
 pandarallel.initialize(progress_bar=True)
 
 
@@ -134,12 +135,12 @@ if __name__ == '__main__':
 
     if args.dataset == 'mimic':
         records = pd.read_csv(os.path.join(args.data_folder, 'machine_measurements.csv'))
-        Parallel(n_jobs=-1)(delayed(process_sample_mimic)(sample) for i, sample in tqdm(records.iterrows()))
+        Parallel(n_jobs=get_max_n_jobs())(delayed(process_sample_mimic)(sample) for i, sample in tqdm(records.iterrows()))
         process_csv_file_mimic(args.label_file, os.path.join(args.output_folder, 'records_w_diag_icd10_labelled.csv'))
 
     if args.dataset == 'code15':
         exams = pd.read_csv(args.label_file)
-        Parallel(n_jobs=-1)(delayed(process_sample_code15)(exam) for exam in tqdm(exams.iterrows()))
+        Parallel(n_jobs=get_max_n_jobs())(delayed(process_sample_code15)(exam) for exam in tqdm(exams.iterrows()))
         process_csv_file_code15(args.label_file, os.path.join(args.output_folder, 'exams_labelled.csv'))
 
 

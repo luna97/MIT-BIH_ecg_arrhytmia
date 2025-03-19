@@ -8,12 +8,12 @@ import shutil
 from collections import Counter
 import pandas as pd
 from joblib import Parallel, delayed
+from dataset.generic_utils import get_max_n_jobs
 
 parser = argparse.ArgumentParser(description='Create dataset for MIT-BIH')
 parser.add_argument('--data_folder', type=str, default='/media/Volume/data/MIT-BHI/data/', help='Path to raw data folder')
 parser.add_argument('--hb_split_type', type=str, default='t_wave', help='How to split the heartbeats, either t_wave or static')
 parser.add_argument('--name', type=str, default='t_wave_split', help='Name of the split')
-parser.add_argument('--n_jobs', type=int, default=-1, help='Number of parallel jobs. -1 means using all processors.')
 args = parser.parse_args()
 
 train = [101, 106, 108, 109, 112, 114, 115, 116, 118, 119, 122, 124, 201, 203, 205, 207, 208, 209, 215, 220, 223, 230]
@@ -217,13 +217,13 @@ def process_patient(patient, data_folder, split, hb_split_type, name):
     return all_data
 
 
-def create_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_wave', name='t_wave_split', n_jobs=-1):
+def create_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_wave', name='t_wave_split'):
     """
     Create CSV mapping with parallel processing.
     """
 
     # Use joblib.Parallel to process patients in parallel
-    results = Parallel(n_jobs=n_jobs)(
+    results = Parallel(n_jobs=get_max_n_jobs())(
         delayed(process_patient)(patient, data_folder, split, hb_split_type, name)
         for patient in tqdm(patient_ids, desc=f"Processing {split} data")
     )
@@ -246,7 +246,5 @@ if __name__ == '__main__':
         shutil.rmtree(args.data_folder + args.name)
 
     os.makedirs(args.data_folder + args.name, exist_ok=True)
-    create_csv_mapping(train, args.data_folder, 'train',
-                       name=args.name, n_jobs=args.n_jobs)
-    create_csv_mapping(test, args.data_folder, 'test',
-                       name=args.name, n_jobs=args.n_jobs)
+    create_csv_mapping(train, args.data_folder, 'train', name=args.name)
+    create_csv_mapping(test, args.data_folder, 'test', name=args.name)

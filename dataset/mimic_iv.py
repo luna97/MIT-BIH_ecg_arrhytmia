@@ -43,37 +43,38 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         record = self.records[idx]
 
-        signal, _ = wfdb.rdsamp(os.path.join(self.data_folder, record))
-        
-        if self.random_shift: signal = random_shift(signal, self.patch_size)
+        with wfdb.rdsamp(os.path.join(self.data_folder, record)) as s:
+            signal = s[0]
+    
+            if self.random_shift: signal = random_shift(signal, self.patch_size)
 
-        signal = torch.tensor(signal, dtype=torch.float32)
+            signal = torch.tensor(signal, dtype=torch.float32)
 
-        if self.leads != leads:
-            # keep the selected leads
-            signal = signal[:, [leads.index(lead) for lead in self.leads]].squeeze()
+            if self.leads != leads:
+                # keep the selected leads
+                signal = signal[:, [leads.index(lead) for lead in self.leads]].squeeze()
 
-        # normalize the signal by subtracting the mean and dividing by the standard deviation
-        if self.normalize:
-            std = signal.std(axis=(0, -1))
-            std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
-            signal = (signal - signal.mean(axis=(0, -1))) / std
+            # normalize the signal by subtracting the mean and dividing by the standard deviation
+            if self.normalize:
+                std = signal.std(axis=(0, -1))
+                std[std == 0] = 1 # avoid division by zero, samples with std = 0 are all zero
+                signal = (signal - signal.mean(axis=(0, -1))) / std
 
-        if '/' in str(record): record = record.split('/')[0]
-        tab_data = self.tab_data.loc[int(record)]
+            if '/' in str(record): record = record.split('/')[0]
+            tab_data = self.tab_data.loc[int(record)]
 
-        tortn = {
-            'signal':signal,
-            'r_peak_interval_mean': torch.tensor(tab_data['r_peak_interval_mean']),
-            'r_peak_variance': torch.tensor(tab_data['r_peak_variance']),
-        }
+            tortn = {
+                'signal':signal,
+                'r_peak_interval_mean': torch.tensor(tab_data['r_peak_interval_mean']),
+                'r_peak_variance': torch.tensor(tab_data['r_peak_variance']),
+            }
 
-        tortn = check_mean_var_r_peaks(tortn)
-         
-        if self.use_tab_data:
-            tab_data = pd.DataFrame(tab_data)
-            tortn['tab_data'] = tab_data
-        return tortn
+            tortn = check_mean_var_r_peaks(tortn)
+            
+            if self.use_tab_data:
+                tab_data = pd.DataFrame(tab_data)
+                tortn['tab_data'] = tab_data
+            return tortn
 
     
     def split_validation_training(self, val_size_pct = 0.1):

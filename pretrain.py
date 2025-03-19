@@ -70,8 +70,6 @@ def pretrain(config, run=None, wandb=False):
     max_cpus = int(os.getenv("SLURM_CPUS_PER_TASK", config.num_workers))
     config.num_workers = min(config.num_workers, max_cpus)
 
-
-
     # set deterministic training
     if config.deterministic: L.seed_everything(42)
 

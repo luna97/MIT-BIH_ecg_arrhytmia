@@ -3,7 +3,7 @@
 #SBATCH --job-name=pretrain_xlstm
 #SBATCH --gpus=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=48
 #SBATCH --mem-per-cpu=1G
 #SBATCH --time=1-00:00:00
 #SBATCH -o ./logs/slurm_output_%j_%x.out # STDOUT
@@ -17,10 +17,10 @@ conda activate xlstm_pretrained
 srun python3 -u pretrain.py --epochs 150 \
     --dropout 0.2 \
     --activation_fn relu \
-    --batch_size 128 \
+    --batch_size 256 \
     --patch_size 64 \
     --loss_type mse_grad_min_max \
-    --num_workers 64 \
+    --num_workers 48 \
     --wd 0.01 \
     --random_shift \
     --embedding_size 1024 \

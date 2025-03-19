@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from models.utils import get_activation_fn, get_xlstm
+from models.utils import get_activation_fn, get_xlstm, get_large_xstm
 from models.modules import TabularEmbeddings, PatchEmbedding, FeatureSpec, EmbedPatching, HeadModule
 from models.SeriesDecomposition import SeriesDecomposition 
 from augmentations import RandomDropLeads, FTSurrogate, Jitter
@@ -20,7 +20,6 @@ class myxLSTM(nn.Module):
         self.patch_size = config.patch_size
         self.use_tab_data = config.use_tab_data
         self.weight_tying = config.weight_tying
-
 
 
         self.activation = get_activation_fn(config.activation_fn)
@@ -75,7 +74,7 @@ class myxLSTM(nn.Module):
         if self.use_tab_data:
             self.tab_embeddings = TabularEmbeddings([
                 FeatureSpec('age', 11, torch.int64, category_size=10),
-                FeatureSpec('is_male', 2, torch.bool),
+                FeatureSpec('is_male', 2, torch.bool),                
                 FeatureSpec('RBBB', 2, torch.bool),
                 FeatureSpec('LBBB', 2, torch.bool),
                 FeatureSpec('SB', 2, torch.bool), # Sinus Bradycardia
@@ -116,6 +115,8 @@ class myxLSTM(nn.Module):
         x, tab_embeddings = self.embed_data(x, tab_data)
 
         x = self.xlstm(x)
+        if isinstance(x, tuple):
+            x = x[0]
 
         if self.use_tab_data:
             # remove the tabular data
@@ -162,6 +163,8 @@ class myxLSTM(nn.Module):
         x = torch.cat([ctx, sep_token, x, cls_token], dim=1)
         # get the last hidden state and apply the head
         x = self.xlstm(x) # [batch_size, embedding_dim]
+        if isinstance(x, tuple):
+            x = x[0]
         
         cls_token = x[:, -1, :]
         x = self.fc(cls_token)

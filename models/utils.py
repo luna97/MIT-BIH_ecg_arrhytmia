@@ -3,6 +3,8 @@ import numpy as np
 import random
 from torch import nn
 from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLayerConfig, sLSTMBlockConfig, xLSTMBlockStackConfig, xLSTMBlockStack
+from xlstm.xlstm_large import xLSTMLargeConfig
+from xlstm.xlstm_large.model import xLSTMLargeBlockStack
 from models.SeriesDecomposition import SeriesDecomposition
 
 def get_activation_fn(activation_fn):
@@ -56,3 +58,24 @@ def get_xlstm(
     )
 
     return xLSTMBlockStack(cfg)
+
+
+def get_large_xstm(       
+        embedding_dim, 
+        dropout=0.2, 
+        blocks=7,
+        num_heads=4
+    ):
+    xlstm_config = xLSTMLargeConfig(
+        embedding_dim=embedding_dim,
+        num_heads=num_heads,
+        num_blocks=blocks,
+        vocab_size=0,
+        return_last_states=False,
+        mode="train_with_padding",
+        chunkwise_kernel="chunkwise--triton_xl_chunk", # xl_chunk == TFLA kernels
+        sequence_kernel="native_sequence__triton",
+        step_kernel="triton",
+    )
+
+    return xLSTMLargeBlockStack(xlstm_config)

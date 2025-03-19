@@ -107,8 +107,7 @@ def collate_fn(batch):
     }
 
     if 'tab_data' in batch[0].keys():
-        tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
-        tortn['tab_data'] = tab_data
+        tab_data = pd.concat([item['tab_data'].T for item in batch], axis=0)
+        tortn['tab_data'] = tab_data.reset_index(drop=True)
 
     return tortn
-

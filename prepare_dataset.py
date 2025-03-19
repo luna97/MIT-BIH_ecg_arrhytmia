@@ -29,6 +29,8 @@ def process_sample_mimic(sample):
     resample_and_save_record_wfdb(record_path, 360, out_path, nk_clean=args.nk_clean)
 
 def add_labels_mimic(exams):
+    exams['is_male'] = exams.parallel_apply(lambda x: x['gender'] == 'M', axis=1)
+
     exams['icd10_codes_set'] = exams.parallel_apply(lambda row: parse_diagnosis(row), axis=1)
     exams['icd10_codes_descs'] = exams.parallel_apply(lambda row: get_desc(row), axis=1)
     exams['icd10_codes_groups'] = exams.parallel_apply(lambda row: get_group(row), axis=1)

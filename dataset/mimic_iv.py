@@ -8,8 +8,6 @@ from dataset.generic_utils import random_shift, find_records, check_mean_var_r_p
 from torch.utils.data import random_split
 from joblib import Parallel, delayed
 import json
-from pandarallel import pandarallel
-pandarallel.initialize(progress_bar=False)
 
 leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 
@@ -33,13 +31,12 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
         self.tab_data = pd.read_csv(self.labels_file)
         # set exam_id as index
         self.tab_data.set_index('study_id', inplace=True)
-        self.tab_data['is_male'] = self.tab_data.parallel_apply(lambda x: x['gender'] == 'M', axis=1)
         # change type of age columns from float to int
         self.tab_data['age'] = self.tab_data['age'].fillna(0)
         self.tab_data['age'] = self.tab_data['age'].astype(int)
         # remove some unised columns
         self.tab_data.drop(columns=['file_name', 'subject_id', 'hosp_diag_hosp', 'ecg_taken_in_ed', 'gender'], inplace=True)
-        print("tabular data fields for CODE 15: ", self.tab_data.head())
+        print("tabular data fields for  MIMIC-IV: ", self.tab_data.head())
 
     def __len__(self):
         return len(self.records)

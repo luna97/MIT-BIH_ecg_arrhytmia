@@ -67,6 +67,11 @@ parser.add_argument('--data_folder_mimic', type=str, default='/media/Volume/data
 parser.add_argument('--labels_file_mimic', type=str, default='/media/Volume/data/MIMIC_IV/records_w_diag_icd10_labelled.csv', help='Labels file for MIMIC dataset')
 
 def pretrain(config, run=None, wandb=False):
+    max_cpus = int(os.getenv("SLURM_CPUS_PER_TASK", config.num_workers))
+    config.num_workers = min(config.num_workers, max_cpus)
+
+
+
     # set deterministic training
     if config.deterministic: L.seed_everything(42)
 

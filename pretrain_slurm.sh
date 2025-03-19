@@ -34,7 +34,6 @@ srun python3 -u pretrain.py --epochs 150 \
     --normalize \
     --random_drop_leads 0.2 \
     --xlstm_config m s m m m m m m m s m m m m m m m s m m m m m m \
-    --loss_type grad \
     --wandb_log \
     --data_folder_mit '/home/datasets/MIT-BIH_arrhythmia/' \
     --data_folder_code15 '/home/datasets/CODE15/360hz_nkclean/' \

@@ -7,3 +7,4 @@ pretrain-xLSTM
 train-xLSTM
 pretrained_models
 None
+logs

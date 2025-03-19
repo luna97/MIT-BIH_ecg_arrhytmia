@@ -10,8 +10,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, Learning
 from trainers.ssl_pretrainer import PretrainedxLSTMNetwork
 import sys
 
-
-# pretrain.py --epochs 100 --dropout 0.4 --activation_fn relu --batch_size 512 --patch_size 128 --embedding_size 784 --use_scheduler --lr 0.0005 --wd 0.1 --data_folder_code15 /media/Volume/data/CODE15/unlabeled_records_360_nkclean --deterministic --xlstm_config m s m m m m --loss_type grad --pretrain_with_code15 --num_workers 32 --normalize --wandb_log --nk_clean
+# for debug:
+# python3 pretrain.py --epochs 100 --dropout 0.2 --activation_fn relu --batch_size 64 --patch_size 64 --embedding_size 128 --use_scheduler --lr 0.0001 --wd 0.01 --deterministic --xlstm_config m --loss_type mse_grad_min_max --num_workers 32 --nk_clean --pretrain_datasets code15 --random_shift --leads I II III aVR aVL aVF V1 V2 V3 V4 V5 V6 --normalize --random_drop_leads 0.2
 
 # argparse
 import argparse
@@ -101,7 +101,7 @@ def pretrain(config, run=None, wandb=False):
 
     if wandb:
         wand_logger = WandbLogger(project="pretrain-xLSTM", experiment=run)
-        wand_logger.watch(model, log='all')
+        wand_logger.watch(model, log='gradients')
         trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[checkpoint_callback, lr_monitor, early_stopping], gradient_clip_val=config.grad_clip)
     else:
         trainer = L.Trainer(max_epochs=config.epochs, callbacks=[checkpoint_callback, lr_monitor, early_stopping], gradient_clip_val=config.grad_clip)

@@ -5,20 +5,10 @@ import torchmetrics.classification
 import torchmetrics.classification.accuracy
 import torchmetrics.classification.precision_recall
 import torchmetrics.classification.specificity
-from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss, masked_min_max_loss
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.nn import functional as F
-from utils.plot_utils import plot_reconstruction, plot_generation
 import numpy as np
-from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
 import torch
-import lightning
-import sys
-import math
-from torch.optim.lr_scheduler import LambdaLR
 from schedulers import get_cosine_with_hard_restarts_schedule_with_warmup_and_decay
 from utils.loss_utils import contrastive_coupled_loss
-
 
 class TrainingxLSTMNetwork(L.LightningModule):
     def __init__(self, model, config,  len_train_dataset, num_classes=5, weights=None):

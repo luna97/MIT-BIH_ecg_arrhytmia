@@ -100,6 +100,9 @@ def process_csv_file_mimic(csv_file, out_csv_file):
     exams = add_labels_mimic(exams)
     exams = add_signal_informations(exams, identifier_key='study_id')
 
+    # ensure correct format of the identifier column
+    exams.parallel_apply(lambda row: str(row['study_id']).split('/')[0], axis=1)
+
     exams.to_csv(out_csv_file)
 
 def process_csv_file_code15(csv_file, out_csv_file):

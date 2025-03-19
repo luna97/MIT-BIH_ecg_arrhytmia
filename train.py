@@ -99,6 +99,7 @@ def train(config, run=None, wandb=False):
 
     if wandb:
         wand_logger = WandbLogger(project="train-xLSTM", experiment=run)
+        wand_logger.watch(model, log='gradients')
         trainer = L.Trainer(max_epochs=config.epochs, logger=wand_logger, callbacks=[early_stopping, lr_monitor], gradient_clip_val=config.grad_clip)
     else:
         trainer = L.Trainer(max_epochs=config.epochs, callbacks=[early_stopping, lr_monitor], gradient_clip_val=config.grad_clip)

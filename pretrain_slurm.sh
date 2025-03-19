@@ -17,7 +17,7 @@ conda activate xlstm_pretrained
 srun python3 -u pretrain.py --epochs 150 \
     --dropout 0.2 \
     --activation_fn relu \
-    --batch_size 256 \
+    --batch_size 128 \
     --patch_size 64 \
     --loss_type mse_grad_min_max \
     --num_workers 64 \

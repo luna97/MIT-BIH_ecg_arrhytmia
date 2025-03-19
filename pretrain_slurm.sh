@@ -26,8 +26,13 @@ srun python3 -u pretrain.py --epochs 150 \
     --pretrain_datasets code15 mimic \
     --nk_clean \
     --leads I II III aVR aVL aVF V1 V2 V3 V4 V5 V6 \
-    --normalize
-    --random_drop_leads 0.2
-    --xlstm_config m s m m m m m m m s m m m m m m m s m m m m m m
+    --normalize \
+    --random_drop_leads 0.2 \
+    --xlstm_config m s m m m m m m m s m m m m m m m s m m m m m m \
     --loss_type grad \
-    --wandb_log
+    --wandb_log \
+    --data_folder_mit '/home/datasets/MIT-BIH_arrhythmia/' \
+    --data_folder_code15 '/home/datasets/CODE15/360hz_nkclean/' \
+    --labels_file_code15 '/home/datasets/CODE15/raw/exams.csv' \
+    --data_folder_mimic '/home/datasets/mimic-iv-ecg/360hz_nkclean/' \
+    --labels_file_mimic '/home/datasets/mimic-iv-ecg/360hz_nkclean/records_w_diag_icd10_labelled.csv'

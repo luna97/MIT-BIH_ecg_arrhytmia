@@ -10,6 +10,8 @@ from trainers.mit_bih_trainer import TrainingxLSTMNetwork
 import torch
 from utils.utils import get_training_class_weights
 import argparse
+import os
+os.environ['XLSTM_EXTRA_INCLUDE_PATHS']='/usr/local/include/cuda/:/usr/include/cuda/'
 
 # training hyperparameters
 parser = argparse.ArgumentParser(description='Train a model')

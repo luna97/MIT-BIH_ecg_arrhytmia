@@ -171,7 +171,7 @@ def process_patient(patient, data_folder, split, hb_split_type, name):
             'age': age,
             'is_male': is_male,
             'extra_annotations': extra_annotations,
-            'r_peaks_interval_mean': np.mean((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
+            'r_peak_interval_mean': np.mean((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
             'r_peak_variance': np.std((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
         }
         all_data.append(row_data)
@@ -209,7 +209,7 @@ def process_patient(patient, data_folder, split, hb_split_type, name):
                 'age': age,
                 'is_male': is_male,
                 'extra_annotations': extra_annotations,
-                'r_peaks_interval_mean': np.mean((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
+                'r_peak_interval_mean': np.mean((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
                 'r_peak_variance': np.std((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
             }
             all_data.append(row_data)

@@ -4,6 +4,10 @@ from tqdm import tqdm
 import torch
 from joblib import Parallel, delayed
 
+def get_max_n_jobs():
+    n_jobs = int(os.getenv("SLURM_CPUS_PER_TASK", -1))
+    return n_jobs
+
 def random_shift(signal, patch_size):
     # remove a random number of datapoints from the signal from 0 to patch size 
     shift = np.random.randint(0, patch_size // 2)
@@ -23,8 +27,7 @@ def find_records(folder, header_extension='.dat'):
     records = set()
 
     print(f'Finding records in {folder}...')
-    n_jobs = int(os.getenv("SLURM_CPUS_PER_TASK", -1))
-    results = Parallel(n_jobs=n_jobs)(delayed(process_file)(root, file) for root, _, files in os.walk(folder) for file in files)
+    results = Parallel(n_jobs=get_max_n_jobs())(delayed(process_file)(root, file) for root, _, files in os.walk(folder) for file in files)
     records.update(filter(None, results))
     records = sorted(records)
     return records

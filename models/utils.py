@@ -6,6 +6,8 @@ from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLa
 from xlstm.xlstm_large import xLSTMLargeConfig
 from xlstm.xlstm_large.model import xLSTMLargeBlockStack
 from models.SeriesDecomposition import SeriesDecomposition
+import os
+
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':

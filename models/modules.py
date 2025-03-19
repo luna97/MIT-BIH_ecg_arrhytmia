@@ -3,6 +3,8 @@ import torch
 import numpy as np
 from torch.nn import functional as F
 from models.utils import get_activation_fn
+from joblib import Parallel, delayed
+from dataset.generic_utils import get_max_n_jobs
 
 class PatchEmbedding(nn.Module):
     def __init__(self, patch_size=64, num_hiddens=256, num_channels=12):
@@ -57,17 +59,18 @@ class TabularEmbeddings(nn.Module):
         device = next(self.parameters()).device
         # zero_tensor = torch.zeros(batch_size, self.num_hiddens, device=device)
         # print('type of tab_data', type(tab_data))
-        for feat in self.feature_specs:
+        def process_feature(feat):
             values = tab_data.get(feat.name)
             if values is not None:
                 values = torch.as_tensor(values.values.astype(float), dtype=feat.dtype).to(device)
                 if not (values == 0).all():
                     values = values.clamp_max(feat.num_categories * feat.category_size - 1) // feat.category_size  # Ensure values are within range
-                    # print('feat', feat.name)
-                    # print('values', values)
-                    # ensure type is correct: 
                     values = values.to(torch.int32)
-                    embeddings.append(self.embeddings[feat.name](values))
+                    return self.embeddings[feat.name](values)
+                return None
+
+        embeddings = Parallel(n_jobs=get_max_n_jobs())(delayed(process_feature)(feat) for feat in self.feature_specs)
+        embeddings = [emb for emb in embeddings if emb is not None]
 
         if embeddings == []:
             tortn = torch.zeros(batch_size, 1, self.num_hiddens, device=device)

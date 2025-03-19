@@ -2,6 +2,7 @@ import numpy as np
 import os 
 from tqdm import tqdm
 import torch
+from joblib import Parallel, delayed
 
 def random_shift(signal, patch_size):
     # remove a random number of datapoints from the signal from 0 to patch size 
@@ -12,14 +13,19 @@ def random_shift(signal, patch_size):
 
     
 def find_records(folder, header_extension='.dat'):
+    def process_file(root, file):
+        extension = os.path.splitext(file)[1]
+        if extension == header_extension:
+            record = os.path.relpath(os.path.join(root, file), folder)[:-len(header_extension)]
+            return record
+        return None
+
     records = set()
+
     print(f'Finding records in {folder}...')
-    for root, directories, files in tqdm(os.walk(folder)):
-        for file in files:
-            extension = os.path.splitext(file)[1]
-            if extension == header_extension:
-                record = os.path.relpath(os.path.join(root, file), folder)[:-len(header_extension)]
-                records.add(record)
+    n_jobs = int(os.getenv("SLURM_CPUS_PER_TASK", -1))
+    results = Parallel(n_jobs=n_jobs)(delayed(process_file)(root, file) for root, _, files in os.walk(folder) for file in files)
+    records.update(filter(None, results))
     records = sorted(records)
     return records
 

@@ -4,7 +4,6 @@ import random
 from torch import nn
 from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLayerConfig, sLSTMBlockConfig, xLSTMBlockStackConfig, xLSTMBlockStack
 from models.SeriesDecomposition import SeriesDecomposition
-from xlstm.xlstm_large
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':

@@ -9,10 +9,12 @@ from collections import Counter
 import pandas as pd
 from joblib import Parallel, delayed
 from dataset.generic_utils import get_max_n_jobs
+from dataset.dataset_preparation_utils import resample_and_save_record_wfdb
 
 parser = argparse.ArgumentParser(description='Create dataset for MIT-BIH')
 parser.add_argument('--data_folder', type=str, default='/media/Volume/data/MIT-BHI/data/', help='Path to raw data folder')
 parser.add_argument('--hb_split_type', type=str, default='t_wave', help='How to split the heartbeats, either t_wave or static')
+parser.add_argument('--nk_clean', action='store_true', help='Use NeuroKit2 to clean the data')
 parser.add_argument('--name', type=str, default='t_wave_split', help='Name of the split')
 args = parser.parse_args()
 
@@ -62,7 +64,7 @@ def get_other_window(signal, r_p, window_size, num_windows, start, end):
     return windows
 
 
-def process_patient(patient, data_folder, split, hb_split_type, name):
+def process_patient(patient, data_folder, split, hb_split_type, name, nk_clean):
     """
     Process a single patient's data.  This function is designed for parallel execution.
     """
@@ -70,7 +72,7 @@ def process_patient(patient, data_folder, split, hb_split_type, name):
     valid_annotations = set(
         ['N', 'L', 'R', 'e', 'j', 'A', 'a', 'J', 'S', 'V', 'E', 'F', '/', 'f', 'Q'])
 
-    signal, _ = wfdb.rdsamp(os.path.join(data_folder + 'raw', f'{patient}'))
+    signal, info = wfdb.rdsamp(os.path.join(data_folder + 'raw', f'{patient}'))
     signal = signal[:, 0]
     annotation = wfdb.rdann(
         os.path.join(data_folder + 'raw', f'{patient}'), 'atr')
@@ -98,8 +100,8 @@ def process_patient(patient, data_folder, split, hb_split_type, name):
 
     # T-wave delineation (only if needed)
     t_offsets = [np.nan] * len(r_peaks)  # Initialize with NaNs
+    cleaned_signal = nk.ecg_clean(signal, sampling_rate=360)
     if hb_split_type == 't_wave':
-        cleaned_signal = nk.ecg_clean(signal, sampling_rate=360)
         # Handle potential errors during delineation
         try:
             _, waves_peak = nk.ecg_delineate(
@@ -116,31 +118,45 @@ def process_patient(patient, data_folder, split, hb_split_type, name):
         except Exception as e:
             print(f"Error delineating patient {patient}: {e}")
             # Keep t_offsets as all NaNs, processing will continue with median strategy
+    if nk_clean:
+        # write the cleaned signal
+        resample_and_save_record_wfdb(
+            record_path=os.path.join(data_folder, 'raw', f'{patient}'), 
+            desired_fs=360, 
+            output_file_path=os.path.join(data_folder, name), 
+            nk_clean=nk_clean
+        )
 
     start = 0
     end = 0
     for i, (r_p, t_o) in enumerate(zip(r_peaks, t_offsets)):
         prev_end = end
+
+        # Determine window  end
         if i == len(r_peaks) - 1:
+            # if last peak assign end to the end of the signal
             end = len(signal)
         elif np.isnan(t_o):
-            end = (r_p + r_peaks[i + 1]) // 2 if i + \
-                1 < len(r_peaks) else len(signal)  # Handle last peak
+            # if the t-wave offset is not available, use the half distance to the next peak
+            if i + 1 < len(r_peaks): end = (r_p + r_peaks[i + 1]) // 2  
+            else: end = len(signal)  # Handle last peak
         else:
             end = int(t_o)  # Ensure integer index
 
-        start = prev_end
 
-        start = max(0, int(start))  # Ensure valid indices
-        end = max(0, int(end))
-
-        if r_p - start > 400:
-            start = r_p - 400
-        if end - r_p > 400:
-            end = r_p + 400
+        # Ensure window is at least 400 samples long in each direction
+        if r_p - start > 160:
+            start = r_p - 160
+            if i > 0 and start < r_peaks[i - 1]:
+                start = r_peaks[i - 1] + 60
+        if end - r_p > 220:
+            end = r_p + 220
+            if i + 1 < len(r_peaks) and end > r_peaks[i + 1]:
+                end = r_peaks[i + 1] - 60
         
         start = max(0, int(start))  # Ensure valid indices
         end = max(0, int(end))
+
         class_label = convert_label(labels[i])
 
         def get_extra_annotation(start, end, annotation_positions, extra_labels):
@@ -217,14 +233,14 @@ def process_patient(patient, data_folder, split, hb_split_type, name):
     return all_data
 
 
-def create_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_wave', name='t_wave_split'):
+def create_csv_mapping(patient_ids, data_folder, split='train', hb_split_type='t_wave', name='t_wave_split', nk_clean=True):
     """
     Create CSV mapping with parallel processing.
     """
 
     # Use joblib.Parallel to process patients in parallel
     results = Parallel(n_jobs=get_max_n_jobs())(
-        delayed(process_patient)(patient, data_folder, split, hb_split_type, name)
+        delayed(process_patient)(patient, data_folder, split, hb_split_type, name, nk_clean)
         for patient in tqdm(patient_ids, desc=f"Processing {split} data")
     )
 
@@ -246,5 +262,5 @@ if __name__ == '__main__':
         shutil.rmtree(args.data_folder + args.name)
 
     os.makedirs(args.data_folder + args.name, exist_ok=True)
-    create_csv_mapping(train, args.data_folder, 'train', name=args.name)
-    create_csv_mapping(test, args.data_folder, 'test', name=args.name)
+    create_csv_mapping(train, args.data_folder, 'train', name=args.name, nk_clean=args.nk_clean)
+    create_csv_mapping(test, args.data_folder, 'test', name=args.name, nk_clean=args.nk_clean)

@@ -86,15 +86,15 @@ def pretrain(config, run=None, wandb=False):
     val_dataset = mit_bih.ECGMITBIHDataset(config, subset='train', random_shift=False)
 
     train_dataset = utils.data.ConcatDataset(datasets_pretrain)
-    train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=code_15.collate_fn)
+    train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=code_15.collate_fn, persistent_workers=True)
 
     # cat the two dataloaders
 
-    val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn)
+    val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn, persistent_workers=True)
 
     len_train_dataset = len(train_dataset)
     test_dataset = mit_bih.ECGMITBIHDataset(config, subset='test', random_shift=False)
-    test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
+    test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers, persistent_workers=True)
     
     xlstm = myxLSTM(config=config, num_classes=5, num_channels=len(config.leads))
     model = PretrainedxLSTMNetwork(model=xlstm, len_train_dataset=len_train_dataset, config=config)

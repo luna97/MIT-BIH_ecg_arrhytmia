@@ -160,7 +160,8 @@ def process_sample(signal, output_file_path, record_name, fs, desired_fs, nk_cle
             signal[:, i] = nk.ecg_clean(signal[:, i], sampling_rate=desired_fs)
 
     # resample the signal to 360 hz
-    signal = nk.signal_resample(signal, sampling_rate=fs, desired_sampling_rate=desired_fs, method='FFT')
+    if fs != desired_fs:
+        signal = nk.signal_resample(signal, sampling_rate=fs, desired_sampling_rate=desired_fs, method='FFT')
 
     if len(signal) < 360:
         print(f"Record {record_name} has less than 360 samples - skipping")

@@ -48,7 +48,10 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
         # load on memory all the signals
         self.signals = {}
         for patient in self.patients:
-            signal, _ = wfdb.rdsamp(os.path.join(self.data_folder, 'raw', f'{patient}'))
+            if self.nkclean:
+                signal, _ = wfdb.rdsamp(os.path.join(self.data_folder, name, f'{patient}'))
+            else:
+                signal, _ = wfdb.rdsamp(os.path.join(self.data_folder, 'raw', f'{patient}'))
             header = wfdb.rdheader(os.path.join(self.data_folder, 'raw', f'{patient}'))
             # normalize the signal
             self.signals[patient] = signal
@@ -97,11 +100,6 @@ class ECGMITBIHDataset(torch.utils.data.Dataset):
             heartbeat_signal = (heartbeat_signal - heartbeat_signal.mean(axis=(0, -1))) / std
 
         # print('window_signal', window_signal.shape)
-
-        if self.nkclean:
-            for i in range(window_signal.shape[1]):
-                window_signal[:, i] = torch.tensor(nk.ecg_clean(window_signal[:, i].clone().detach().numpy(), sampling_rate=360).copy(), dtype=torch.float32)
-                heartbeat_signal[:, i] = torch.tensor(nk.ecg_clean(heartbeat_signal[:, i].clone().detach().numpy(), sampling_rate=360).copy(), dtype=torch.float32)
 
         window_signal = self.filter_leads(window_signal, header.__dict__['sig_name'])
         heartbeat_signal = self.filter_leads(heartbeat_signal, header.__dict__['sig_name'])

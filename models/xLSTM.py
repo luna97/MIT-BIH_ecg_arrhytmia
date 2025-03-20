@@ -70,7 +70,6 @@ class myxLSTM(nn.Module):
 
         if self.weight_tying: self.reconstruction.deconv.weight = self.patch_embedding.conv.weight
 
-    
         if self.use_tab_data:
             self.tab_embeddings = TabularEmbeddings([
                 FeatureSpec('age', 11, torch.int64, category_size=10),
@@ -105,11 +104,11 @@ class myxLSTM(nn.Module):
             # eventually add the tabular data
             batch_size = x.shape[0]
             tab_emb = self.tab_embeddings(tab_data, batch_size)
-            _, num_embeddings, _ = tab_emb.shape
-            x = torch.cat([tab_emb, x], dim=1)
-            return x, num_embeddings
-        else:
-            return x, 0
+            if tab_emb is not None:
+                _, num_embeddings, _ = tab_emb.shape
+                x = torch.cat([tab_emb, x], dim=1)
+                return x, num_embeddings
+        return x, 0
 
     def reconstruct(self, x, tab_data):
         x, tab_embeddings = self.embed_data(x, tab_data)

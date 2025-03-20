@@ -72,8 +72,8 @@ class TabularEmbeddings(nn.Module):
         embeddings = Parallel(n_jobs=get_max_n_jobs())(delayed(process_feature)(feat) for feat in self.feature_specs)
         embeddings = [emb for emb in embeddings if emb is not None]
 
-        if embeddings == []:
-            tortn = torch.zeros(batch_size, 1, self.num_hiddens, device=device)
+        if embeddings is None or len(embeddings) == 0:
+            return None
         
         tortn = torch.stack(embeddings, dim=1) # (batch_size, num_features, num_hiddens)
         tortn = self.dropout(tortn)

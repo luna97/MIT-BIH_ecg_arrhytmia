@@ -26,6 +26,7 @@ class TrainingxLSTMNetwork(L.LightningModule):
         self.sched_decay_factor = config.sched_decay_factor
         self.num_epochs_warm_restart = config.num_epochs_warm_restart
         self.contrastive_loss_lambda = config.contrastive_loss_lambda
+        self.label_smoothing = config.label_smoothing
         self.epochs = config.epochs
         self.train_acc = torchmetrics.classification.accuracy.MulticlassAccuracy(num_classes=num_classes, top_k=1, average='micro')
         self.valid_acc = torchmetrics.classification.accuracy.MulticlassAccuracy(num_classes=num_classes, top_k=1, average='micro')
@@ -170,7 +171,7 @@ class TrainingxLSTMNetwork(L.LightningModule):
         targets = batch['label']
         out, cls_token = self.model(ctx, x, tab_data)
         preds = torch.argmax(out, dim=1)
-        loss = nn.functional.cross_entropy(out, targets, weight=self.weights)
+        loss = nn.functional.cross_entropy(out, targets, weight=self.weights, label_smoothing=self.label_smoothing)
         if self.contrastive_loss_lambda > 0:
             contrastive_loss = contrastive_coupled_loss(cls_token, targets, batch['patient_ids'], class_weights=self.weights) * 0.1
             return loss, contrastive_loss, out, preds

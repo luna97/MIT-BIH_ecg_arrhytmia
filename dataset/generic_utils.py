@@ -4,9 +4,10 @@ from tqdm import tqdm
 import torch
 from joblib import Parallel, delayed
 
-def get_max_n_jobs():
-    n_jobs = int(os.getenv("SLURM_CPUS_PER_TASK", -1))
+def get_max_n_jobs(default=-1):
+    n_jobs = int(os.getenv("SLURM_CPUS_PER_TASK", default))
     return n_jobs
+    
 
 def random_shift(signal, patch_size):
     # remove a random number of datapoints from the signal from 0 to patch size 

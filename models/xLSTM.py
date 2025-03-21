@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from models.utils import get_activation_fn, get_xlstm, get_large_xstm
-from models.modules import TabularEmbeddings, PatchEmbedding, FeatureSpec, EmbedPatching, HeadModule
+from models.utils import get_activation_fn, get_xlstm, get_large_xlstm, get_patch_embedding
+from models.modules import TabularEmbeddings, FeatureSpec, EmbedPatching, HeadModule
 from models.SeriesDecomposition import SeriesDecomposition 
 from augmentations import RandomDropLeads, FTSurrogate, Jitter
 import numpy as np
@@ -24,11 +24,14 @@ class myxLSTM(nn.Module):
 
         self.activation = get_activation_fn(config.activation_fn)
 
-        self.patch_embedding = PatchEmbedding(patch_size=config.patch_size, num_hiddens=config.embedding_size)
+        self.patch_embedding = get_patch_embedding(config.patch_embedding, config.patch_size, config.embedding_size, num_channels)
         self.sep_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
         self.cls_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
 
-        self.xlstm = get_xlstm(config.embedding_size, dropout=config.dropout, blocks=config.xlstm_config, num_heads=config.num_heads)
+        if config.xlstm_type == 'large':
+            self.xlstm = get_large_xlstm(config.embedding_size, dropout=config.dropout)
+        else:
+            self.xlstm = get_xlstm(config.embedding_size, dropout=config.dropout, blocks=config.xlstm_config, num_heads=config.num_heads)
 
         self.random_drop_leads = RandomDropLeads(config.random_drop_leads)
         self.random_surrogate = FTSurrogate(0.05, prob=config.random_surrogate_prob)
@@ -41,24 +44,6 @@ class myxLSTM(nn.Module):
             dropout=config.dropout, 
             activation_fn=config.activation_fn
         )
-
-        self.use_mean_var_head = 'mean_var' in config.loss_type
-
-        if self.use_mean_var_head:
-            self.variance_head = HeadModule(
-                inp_size=config.embedding_size, 
-                hidden_size=config.embedding_size // 2,
-                out_size=1, 
-                dropout=config.dropout,
-                activation_fn=config.activation_fn
-            )
-            self.mean_head = HeadModule(
-                inp_size=config.embedding_size, 
-                hidden_size=config.embedding_size // 2, 
-                out_size=1, 
-                dropout=config.dropout,
-                activation_fn=config.activation_fn
-            )
 
         self.reconstruction = EmbedPatching(
             patch_size=config.patch_size, 
@@ -122,12 +107,7 @@ class myxLSTM(nn.Module):
             x = x[:, tab_embeddings:, :]
         
         r = self.reconstruction(x)
-
-        if self.use_mean_var_head:
-            mean = self.mean_head(x[:, -1, :])
-            variance = self.variance_head(x[:, -1, :])
-            return r, mean, variance
-    
+        
         return r
     
     def generate(self, x, tab_data, length=10):

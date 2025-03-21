@@ -76,7 +76,7 @@ class ECGCODE15Dataset(Dataset):
 
         if self.use_tab_data:
             tab_data = pd.DataFrame(tab_data)
-            tortn['tab_data'] = tab_data
+            tortn['tab_data'] = tab_data.T
         
         return tortn
         
@@ -107,7 +107,6 @@ def collate_fn(batch):
     }
 
     if 'tab_data' in batch[0].keys():
-        tab_data = pd.concat([item['tab_data'].T for item in batch], axis=0)
-        tortn['tab_data'] = tab_data.reset_index(drop=True)
+        tab_data = pd.concat([item['tab_data'] for item in batch], axis=0)
 
     return tortn

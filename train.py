@@ -31,6 +31,7 @@ parser.add_argument('--is_sweep', action='store_true', help='Is a sweep')
 parser.add_argument('--grad_clip', type=float, default=5, help='Gradient clipping value')
 parser.add_argument('--weight_tying', action='store_true', help='Weight tying')
 parser.add_argument('--use_class_weights', action='store_true', help='Use class weights for the loss function')
+parser.add_argument('--label_smoothing', type=float, default=0., help='Label smoothing')
 
 # optimize and scheduler
 parser.add_argument('--optimizer', type=str, default='adamw', help='Optimizer')
@@ -49,6 +50,9 @@ parser.add_argument('--activation_fn', type=str, default='relu', help='Activatio
 parser.add_argument('--xlstm_config', type=str, nargs='*', default=['m', 's', 'm', 'm', 'm', 'm', 'm'])
 parser.add_argument('--wandb_log', action='store_true', help='Log to wandb')
 parser.add_argument('--num_heads', type=int, default=4, help='Number of heads for the mLSTM module')
+parser.add_argument('--xlstm_type', type=str, default='small', help='Type of xLSTM to use')
+parser.add_argument('--patch_embedding', default='linear', help='Patch embedding type')
+
 
 # data and augmentations hyperparameters
 parser.add_argument('--normalize', action='store_true', help='Normalize the data')
@@ -78,11 +82,11 @@ def train(config, run=None, wandb=False):
     else:
         weights = None
 
-    train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn)
-    val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn)
+    train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn, persistent_workers=True)
+    val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn, persistent_workers=True)
 
     test_dataset = mit_bih.ECGMITBIHDataset(config, subset='test', use_labels_in_tab_data=False, random_shift=config.random_shift)
-    test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
+    test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers, persistent_workers=True)
 
     xlstm = myxLSTM(config=config, num_classes=5, num_channels=len(config.leads))
 

@@ -12,16 +12,18 @@ leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V
 
 def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
     with torch.no_grad():
-        tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
+        tab_data = sample['tab_data'].reset_index(drop=True) if 'tab_data' in sample.keys() else None
+
         signal = sample['signal'].to(device).unsqueeze(0)
+
+        # print('signal shape', signal.shape)
+        # print(tab_data)
+
         orig_signal = signal.clone()
         if len(signal.shape) == 2:
             signal = signal.unsqueeze(-1)
-        
-        if model.use_mean_var_head:
-            reconstruct, _, _ = model.reconstruct(signal, tab_data) 
-        else:
-            reconstruct = model.reconstruct(signal, tab_data)
+
+        reconstruct = model.reconstruct(signal, tab_data)
             
         # if reconstruct is a tuple, get the first element
         if isinstance(reconstruct, tuple):
@@ -84,14 +86,14 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
     
 def plot_generation(sample, model, patch_size, device, logdir, epoch, name):
     with torch.no_grad():
-        tab_data = sample['tab_data'] if 'tab_data' in sample.keys() else None
+        tab_data = sample['tab_data'].reset_index(drop=True) if 'tab_data' in sample.keys() else None
         signal = sample['signal'].to(device).unsqueeze(0)
 
         signal = signal[:, :signal.shape[1] - signal.shape[1] % patch_size]
         if len(signal.shape) == 2:
             signal = signal.unsqueeze(-1)
 
-        generated = model.generate(signal, tab_data=tab_data, length=12)
+        generated = model.generate(signal, tab_data=tab_data, length=(2048 // patch_size))
 
         fig = plt.figure(figsize=(20, 15))
         gs = gridspec.GridSpec(signal.shape[-1] // 2, 2)

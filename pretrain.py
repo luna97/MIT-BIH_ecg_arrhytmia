@@ -9,8 +9,6 @@ import dataset.mimic_iv as mimic
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from trainers.ssl_pretrainer import PretrainedxLSTMNetwork
 import sys
-import os
-os.environ['XLSTM_EXTRA_INCLUDE_PATHS']='/usr/local/include/cuda/:/usr/include/cuda/'
 
 # for debug:
 # python3 pretrain.py --epochs 100 --dropout 0.2 --activation_fn relu --batch_size 64 --patch_size 64 --embedding_size 128 --use_scheduler --lr 0.0001 --wd 0.01 --deterministic --xlstm_config m --loss_type mse_grad_min_max --num_workers 32 --nk_clean --pretrain_datasets code15 --random_shift --leads I II III aVR aVL aVF V1 V2 V3 V4 V5 V6 --normalize --random_drop_leads 0.2
@@ -18,6 +16,7 @@ os.environ['XLSTM_EXTRA_INCLUDE_PATHS']='/usr/local/include/cuda/:/usr/include/c
 # argparse
 import argparse
 parser = argparse.ArgumentParser(description='Train a model')
+
 # training hyperparameters
 parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')
 parser.add_argument('--wd', type=float, default=0.0001, help='Weight decay')
@@ -33,7 +32,6 @@ parser.add_argument('--use_tab_data', action='store_true', help='Use tabular dat
 parser.add_argument('--patience', type=int, default=10, help='Patience for the early stopping')
 parser.add_argument('--is_sweep', action='store_true', help='Is a sweep')
 parser.add_argument('--grad_clip', type=float, default=5, help='Gradient clipping value')
-parser.add_argument('--weight_tying', action='store_true', help='Weight tying')
 
 # optimize and scheduler
 parser.add_argument('--optimizer', type=str, default='adamw', help='Optimizer')
@@ -47,6 +45,10 @@ parser.add_argument('--activation_fn', type=str, default='leakyrelu', help='Acti
 parser.add_argument('--xlstm_config', type=str, nargs='*', default=['m', 's', 'm', 'm', 'm', 'm', 'm'])
 parser.add_argument('--wandb_log', action='store_true', help='Log to wandb')
 parser.add_argument('--num_heads', type=int, default=4, help='Number of heads for the mLSTM module')
+parser.add_argument('--xlstm_type', type=str, default='original', help='Type of xLSTM to use')
+parser.add_argument('--weight_tying', action='store_true', help='Weight tying')
+parser.add_argument('--patch_embedding', default='linear', help='Patch embedding type')
+
 
 # data and augmentations hyperparameters
 parser.add_argument('--normalize', action='store_true', help='Normalize the data')
@@ -58,6 +60,7 @@ parser.add_argument('--random_jitter_prob', type=float, default=0, help='Random 
 parser.add_argument('--pretrain_datasets', type=str, nargs='*', default=['mimic', 'code15'], help='Datasets to use for pretraining')
 parser.add_argument('--nk_clean', action='store_true', help='Use nk_clean for the code15 dataset')
 parser.add_argument('--leads', type=str, nargs='*', default=['II'], help='Leads to use for the dataset')
+parser.add_argument('--debug', action='store_true', help='Debug mode, uses only a fraction of data for epoch')
 
 # dataset folders
 parser.add_argument('--data_folder_mit', type=str, default='/media/Volume/data/MIT-BHI/data', help='Data folder for MIT-BHI dataset')
@@ -69,6 +72,8 @@ parser.add_argument('--labels_file_mimic', type=str, default='/media/Volume/data
 def pretrain(config, run=None, wandb=False):
     max_cpus = int(os.getenv("SLURM_CPUS_PER_TASK", config.num_workers))
     config.num_workers = min(config.num_workers, max_cpus)
+
+
 
     # set deterministic training
     if config.deterministic: L.seed_everything(42)
@@ -86,15 +91,17 @@ def pretrain(config, run=None, wandb=False):
     val_dataset = mit_bih.ECGMITBIHDataset(config, subset='train', random_shift=False)
 
     train_dataset = utils.data.ConcatDataset(datasets_pretrain)
-    train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=code_15.collate_fn, persistent_workers=True)
+    # keep only 10% of the dataset
+    if config.debug: train_dataset = utils.data.Subset(train_dataset, range(0, len(train_dataset) // 100))
+    train_dataloader = utils.data.DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, collate_fn=code_15.collate_fn)
 
     # cat the two dataloaders
-
-    val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn, persistent_workers=True)
+    if config.debug: val_dataset = utils.data.Subset(val_dataset, range(0, len(val_dataset) // 10))
+    val_dataloader = utils.data.DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, collate_fn=mit_bih.collate_fn)
 
     len_train_dataset = len(train_dataset)
     test_dataset = mit_bih.ECGMITBIHDataset(config, subset='test', random_shift=False)
-    test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers, persistent_workers=True)
+    test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
     
     xlstm = myxLSTM(config=config, num_classes=5, num_channels=len(config.leads))
     model = PretrainedxLSTMNetwork(model=xlstm, len_train_dataset=len_train_dataset, config=config)

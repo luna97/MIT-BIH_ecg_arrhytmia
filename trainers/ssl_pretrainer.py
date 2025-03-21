@@ -120,12 +120,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
 
         x = F.pad(x, (0, 0, 0, self.patch_size - x.shape[1] % self.patch_size))
 
-        if self.model.use_mean_var_head:
-            reconstruction, mean, var = self.model.reconstruct(x, tab_data)
-        else:
-            reconstruction = self.model.reconstruct(x, tab_data)
-            mean, var = None, None
-
+        reconstruction = self.model.reconstruct(x, tab_data)
         nrmse = np.inf
 
         shift_x = x[:, self.patch_size:].squeeze()
@@ -134,8 +129,8 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         # compute the loss and use the gradients only when it is needed
         if 'min_max' in self.loss_type:
             min_max = masked_min_max_loss(shift_reconstruct, shift_x, patch_size=self.patch_size)
-        else:
-            with torch.no_grad(): min_max = masked_min_max_loss(shift_reconstruct, shift_x, patch_size=self.patch_size)
+        # else:
+        #    with torch.no_grad(): min_max = masked_min_max_loss(shift_reconstruct, shift_x, patch_size=self.patch_size)
 
         if 'mae' in self.loss_type:
             mae = (shift_reconstruct, shift_x)
@@ -157,19 +152,11 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         with torch.no_grad():
             nrmse = torch.sqrt(mse) / (shift_x.max() - shift_x.min())
 
-        # mae on the mean r peak interval
-        if 'mean_var' in self.loss_type:
-            mae_mean_r = masked_mae_loss(mean.squeeze(), mean_target, reduction='mean')
-            mae_var_r = masked_mae_loss(var.squeeze(), var_target, reduction='mean')
-
-            self.log(f"{step}_mae_mean_r_interval", mae_mean_r.item(), prog_bar=False, batch_size=self.batch_size)
-            self.log(f"{step}_mae_std_r_interval", mae_var_r.item(), prog_bar=False, batch_size=self.batch_size)
-
 
         self.log(f"{step}_mse", mse.item(), prog_bar=False, batch_size=self.batch_size)
         self.log(f"{step}_mae", mae.item(), prog_bar=False, batch_size=self.batch_size)
         self.log(f"{step}_grad", grad.item(), prog_bar=False, batch_size=self.batch_size)
-        self.log(f"{step}_min_max", min_max.item(), prog_bar=False, batch_size=self.batch_size)
+        if 'min_max' in self.loss_type: self.log(f"{step}_min_max", min_max.item(), prog_bar=False, batch_size=self.batch_size)
         self.log(f"{step}_nrmse", nrmse.mean().item(), prog_bar=True, batch_size=self.batch_size)
         
         loss = torch.tensor(0.0, device=self.device)
@@ -178,7 +165,6 @@ class PretrainedxLSTMNetwork(L.LightningModule):
 
         if 'grad' in self.loss_type: loss += grad
         if 'min_max' in self.loss_type: loss += min_max
-        if 'mean_var' in self.loss_type: loss += (mae_mean_r + mae_var_r) / 4 # giving less importance
 
         self.log(f"{step}_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
         return loss

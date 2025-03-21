@@ -72,7 +72,8 @@ class ECGMIMICDataset(torch.utils.data.Dataset):
          
         if self.use_tab_data:
             tab_data = pd.DataFrame(tab_data)
-            tortn['tab_data'] = tab_data
+            # reset the index to get the column name
+            tortn['tab_data'] = tab_data.T
         return tortn
 
     

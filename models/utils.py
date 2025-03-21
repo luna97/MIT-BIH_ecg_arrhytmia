@@ -5,9 +5,19 @@ from torch import nn
 from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLayerConfig, sLSTMBlockConfig, xLSTMBlockStackConfig, xLSTMBlockStack
 from xlstm.xlstm_large import xLSTMLargeConfig
 from xlstm.xlstm_large.model import xLSTMLargeBlockStack
-from models.SeriesDecomposition import SeriesDecomposition
+from models.modules import mLSTMWrapper, LinearPatchEmbedding, ConvPatchEmbedding, ONNConvPatchEmbedding
 import os
 
+def get_patch_embedding(type, patch_size, num_hiddens, num_channels):
+    if type == 'linear':
+        print('using linear patch embedding')
+        return LinearPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens)
+    if type == 'conv':
+        print('using conv patch embedding')
+        return ConvPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens, num_channels=num_channels)
+    if type == 'onn':
+        print('using ONN patch embedding')
+        return ONNConvPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens, num_channels=num_channels)
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':
@@ -62,22 +72,23 @@ def get_xlstm(
     return xLSTMBlockStack(cfg)
 
 
-def get_large_xstm(       
+def get_large_xlstm(       
         embedding_dim, 
         dropout=0.2, 
-        blocks=7,
+        blocks=['m', 'm', 'm', 'm', 'm', 'm', 'm'],
         num_heads=4
     ):
     xlstm_config = xLSTMLargeConfig(
         embedding_dim=embedding_dim,
         num_heads=num_heads,
-        num_blocks=blocks,
+        num_blocks=len(blocks),
         vocab_size=0,
-        return_last_states=False,
-        mode="train_with_padding",
+        return_last_states=True,
+        mode="train",
         chunkwise_kernel="chunkwise--triton_xl_chunk", # xl_chunk == TFLA kernels
         sequence_kernel="native_sequence__triton",
         step_kernel="triton",
     )
 
-    return xLSTMLargeBlockStack(xlstm_config)
+    blocks = xLSTMLargeBlockStack(xlstm_config)
+    return mLSTMWrapper(blocks)

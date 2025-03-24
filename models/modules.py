@@ -2,6 +2,7 @@ from torch import nn
 import torch 
 import numpy as np
 from fastonn import SelfONN1d
+from models.u_net import DoubleXLSTMDown, DoubleXLSTMUp
 
 class LinearPatchEmbedding(nn.Module):
     def __init__(self, patch_size=64, num_hiddens=256, num_channels=12):
@@ -10,6 +11,20 @@ class LinearPatchEmbedding(nn.Module):
 
     def forward(self, x):
         x = self.conv(x).flatten(2).transpose(1, 2)
+        return x
+      
+class EmbedPatching(nn.Module):
+    def __init__(self, patch_size=64, num_hiddens=256, num_channels=12, activation_fn='relu', use_pre_head=False):
+        super().__init__()
+        self.use_pre_head = use_pre_head  
+        if use_pre_head: self.pre_head = HeadModule(num_hiddens, num_hiddens // 2, num_hiddens, activation_fn=activation_fn)
+        self.deconv = nn.ConvTranspose1d(num_hiddens, num_channels, kernel_size=patch_size, stride=patch_size, bias=False)
+
+    def forward(self, x):
+        if self.use_pre_head: x = self.pre_head(x)
+        x = x.transpose(1, 2)
+        x = self.deconv(x).transpose(1, 2)
+        # print('x shape after deconv', x.shape) [1, 3584, 12]
         return x
     
 class ConvPatchEmbedding(nn.Module):
@@ -101,20 +116,43 @@ class ONNConvPatchEmbedding(nn.Module):
         # print('x shape after unfold', x.shape)
         return x
     
-    
-class EmbedPatching(nn.Module):
-    def __init__(self, patch_size=64, num_hiddens=256, num_channels=12, activation_fn='relu', use_pre_head=False):
+class UNetPatchEmbedding(nn.Module):
+    def __init__(self, patch_size=64, num_hiddens=256, num_channels=12, dropout=0.1):
         super().__init__()
-        self.use_pre_head = use_pre_head  
-        if use_pre_head: self.pre_head = HeadModule(num_hiddens, num_hiddens // 2, num_hiddens, activation_fn=activation_fn)
-        self.deconv = nn.ConvTranspose1d(num_hiddens, num_channels, kernel_size=patch_size, stride=patch_size, bias=False)
+        self.linear_patch_emb = LinearPatchEmbedding(patch_size, num_hiddens, num_channels)
+
+        self.down1 = DoubleXLSTMDown(num_hiddens, final_size=num_hiddens // 2, dropout=dropout)
+        self.down2 = DoubleXLSTMDown(num_hiddens // 2, final_size=num_hiddens // 4, dropout=dropout)
+        # self.down3 = DoubleXLSTMDown(num_hiddens // 4, final_size=num_hiddens // 8, dropout=dropout)
+        self.patch_size = patch_size
 
     def forward(self, x):
-        if self.use_pre_head: x = self.pre_head(x)
-        x = x.transpose(1, 2)
-        x = self.deconv(x).transpose(1, 2)
-        return x
+        x2 = self.linear_patch_emb(x)
+        x1 = self.down1(x2)
+        x = self.down2(x1)
+        # x3 = self.down3(x2)
+        return x, x1, x2, None
+  
     
+class UNetEmbedPatching(nn.Module):
+    def __init__(self, patch_size=64, num_hiddens=256, num_channels=12):
+        super().__init__()
+        self.up1 = DoubleXLSTMUp(num_hiddens // 2, initial_size=num_hiddens // 4, dropout=0.1)
+        self.up2 = DoubleXLSTMUp(num_hiddens, initial_size=num_hiddens // 2, dropout=0.1)
+        # self.up3 = DoubleXLSTMUp(num_hiddens, initial_size=num_hiddens // 2, dropout=0.1)
+        self.patch_size = patch_size
+        self.depatch = EmbedPatching(patch_size, num_hiddens, num_channels)
+
+    def forward(self, x, x1, x2, _):
+        # x after middle block
+        #print('x shape', x.shape)
+        #print('x1 shape', x1.shape)
+        #print('x2 shape', x2.shape)
+        x = self.up1(x, x1)
+        x = self.up2(x, x2)
+        # x = self.up3(x, x1)
+        x = self.depatch(x)
+        return x
 
 class FeatureSpec(object):
     def __init__(self, name, num_categories, dtype, category_size=1):
@@ -122,6 +160,8 @@ class FeatureSpec(object):
         self.num_categories = num_categories
         self.dtype = dtype
         self.category_size = category_size
+    
+
  
 
 class TabularEmbeddings(nn.Module):
@@ -202,20 +242,42 @@ class HeadModule(nn.Module):
         return self.head(x)
     
 class mLSTMWrapper(nn.Module):
-    def __init__(self, xlstm):
-        super(mLSTMWrapper, self).__init__()
+    def __init__(self, xlstm, dropout=0.2):
+        super(mLSTMWrapper, self).__init__() 
         self.model = xlstm
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         len_seq = x.shape[1]
         pad_len = max(16 - len_seq, 2**int(np.ceil(np.log2(len_seq))) - len_seq)
         x = torch.cat([torch.zeros(x.shape[0], pad_len, x.shape[2]).to(x.device), x], dim=1)
-        x, _ = self.model(x)
+        x, _ = self.model_forward_wrap(x)
         return x[:, pad_len:, :]
     
     def step(self, x, state):
         len_seq = x.shape[1]
         pad_len = max(16 - len_seq, 2**int(np.ceil(np.log2(len_seq))) - len_seq)
         x = torch.cat([torch.zeros(x.shape[0], pad_len, x.shape[2]).to(x.device), x], dim=1)
-        x, state = self.model(x, state)
+        x, state = self.model_forward_wrap(x, state)
         return x[:, pad_len:, :], state
+    
+    def model_forward_wrap(self, x, state = None):
+        if state is None:
+            state = {i: None for i in range(len(self.model.blocks))}
+
+        for i, block in enumerate(self.model.blocks):
+            block_state = state[i]
+            x = self.dropout(x)
+            x, block_state_new = block(x, block_state)
+
+            if block_state is None:
+                state[i] = block_state_new
+            else:
+                # layer state is a tuple of three tensors: c, n, m
+                # we update the state in place in order to avoid creating new tensors
+                for state_idx in range(len(block_state)):
+                    state[i][state_idx].copy_(block_state_new[state_idx])
+
+        x = self.model.out_norm(x)
+
+        return x, state

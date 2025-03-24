@@ -13,6 +13,7 @@ import argparse
 import os
 os.environ['XLSTM_EXTRA_INCLUDE_PATHS']='/usr/local/include/cuda/:/usr/include/cuda/'
 
+# train.py --epochs 30 --dropout 0.4 --activation_fn relu --batch_size 128 --patch_size 64 --embedding_size 784 --use_scheduler --wd 0.01 --deterministic --xlstm_config m s m m m m m s m m m m --num_workers 32 --nk_clean --random_shift --leads I II III aVR aVL aVF V1 V2 V3 V4 V5 V6 --normalize --random_shift --lr_head 0.001 --lr_xlstm 0.000001 --checkpoint pretrained_models/jg7je6hh/checkpoints/epoch=38-step=174330.ckpt --wandb_log --deterministic --num_epochs_warm_restart 15 --split_by_patient --use_class_weights --xlstm_type small
 # training hyperparameters
 parser = argparse.ArgumentParser(description='Train a model')
 parser.add_argument('--lr_head', type=float, default=0.0001, help='Learning rate for the classification head')
@@ -52,7 +53,8 @@ parser.add_argument('--wandb_log', action='store_true', help='Log to wandb')
 parser.add_argument('--num_heads', type=int, default=4, help='Number of heads for the mLSTM module')
 parser.add_argument('--xlstm_type', type=str, default='small', help='Type of xLSTM to use')
 parser.add_argument('--patch_embedding', default='linear', help='Patch embedding type')
-
+parser.add_argument('--reconstruct_embedding', default='linear', help='Reconstruction head type')
+parser.add_argument('--bidirectional', action='store_true', help='Bidirectional LSTM')
 
 # data and augmentations hyperparameters
 parser.add_argument('--normalize', action='store_true', help='Normalize the data')
@@ -90,9 +92,18 @@ def train(config, run=None, wandb=False):
 
     xlstm = myxLSTM(config=config, num_classes=5, num_channels=len(config.leads))
 
+    def format_keys(key):
+        if key.startswith('model.'):
+            key = key[6:]
+
+        if key.startswith('xlstm.model.blocks'):
+            key.replace('xlstm.model.blocks', 'xlstm.blocks')
+        
+        return key
+
     if config.checkpoint is not None and config.checkpoint != '':   
         checkpoint = torch.load(config.checkpoint)
-        new_state_dict = {k.replace('model.', ''): v for k, v in checkpoint['state_dict'].items()}
+        new_state_dict = {format_keys(k): v for k, v in checkpoint['state_dict'].items()}
         message = xlstm.load_state_dict(new_state_dict, strict=False) 
         print(message) 
 

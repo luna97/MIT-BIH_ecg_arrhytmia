@@ -179,16 +179,20 @@ class TrainingxLSTMNetwork(L.LightningModule):
             return loss, 0, out, preds
 
     def get_params(self):
-        return [
+        params = [
             # head and sep token with normal lr
             {'params': self.model.fc.parameters(), 'lr': self.lr_head, 'weight_decay': self.wd},
             {'params': self.model.sep_token, 'lr': self.lr_head, 'weight_decay': self.wd},
             {'params': self.model.cls_token, 'lr': self.lr_head, 'weight_decay': self.wd},
+            {'params': self.model.start_token, 'lr': self.lr_head, 'weight_decay': self.wd},
 
             # xlstm and patch embedding with lower lr
             {'params': self.model.xlstm.parameters(), 'lr': self.lr_xlstm, 'weight_decay': self.wd},
             {'params': self.model.patch_embedding.parameters(), 'lr': self.lr_xlstm, 'weight_decay': self.wd}
         ]
+        if self.model.bidirectional:
+            params.append({'params': self.model.xlstm_bi.parameters(), 'lr': self.lr_xlstm, 'weight_decay': self.wd})
+        return params
         
     def configure_optimizers(self):
         if self.optimizer == 'adam':

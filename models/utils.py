@@ -5,7 +5,7 @@ from torch import nn
 from xlstm import FeedForwardConfig, mLSTMLayerConfig, mLSTMBlockConfig, sLSTMLayerConfig, sLSTMBlockConfig, xLSTMBlockStackConfig, xLSTMBlockStack
 from xlstm.xlstm_large import xLSTMLargeConfig
 from xlstm.xlstm_large.model import xLSTMLargeBlockStack
-from models.modules import mLSTMWrapper, LinearPatchEmbedding, ConvPatchEmbedding, ONNConvPatchEmbedding
+from models.modules import mLSTMWrapper, LinearPatchEmbedding, ConvPatchEmbedding, ONNConvPatchEmbedding, UNetPatchEmbedding, HeadModule, EmbedPatching, UNetEmbedPatching
 import os
 
 def get_patch_embedding(type, patch_size, num_hiddens, num_channels):
@@ -18,6 +18,25 @@ def get_patch_embedding(type, patch_size, num_hiddens, num_channels):
     if type == 'onn':
         print('using ONN patch embedding')
         return ONNConvPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens, num_channels=num_channels)
+    if type == 'unet':
+        print('using UNet patch embedding')
+        return UNetPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens, num_channels=num_channels)
+
+def get_reconstruction_head(type, patch_size, embedding_size, num_channels, activation_fn):
+    if type == 'linear':
+        return EmbedPatching(
+            patch_size=patch_size, 
+            num_hiddens=embedding_size, 
+            num_channels=num_channels, 
+            activation_fn=activation_fn, 
+            use_pre_head=True
+        )
+    if type == 'unet':
+        return UNetEmbedPatching(
+            patch_size=patch_size, 
+            num_hiddens=embedding_size, 
+            num_channels=num_channels
+        )
 
 def get_activation_fn(activation_fn):
     if activation_fn == 'relu':
@@ -76,7 +95,7 @@ def get_large_xlstm(
         embedding_dim, 
         dropout=0.2, 
         blocks=['m', 'm', 'm', 'm', 'm', 'm', 'm'],
-        num_heads=4
+        num_heads=4,
     ):
     xlstm_config = xLSTMLargeConfig(
         embedding_dim=embedding_dim,
@@ -91,4 +110,4 @@ def get_large_xlstm(
     )
 
     blocks = xLSTMLargeBlockStack(xlstm_config)
-    return mLSTMWrapper(blocks)
+    return mLSTMWrapper(blocks, dropout=dropout)

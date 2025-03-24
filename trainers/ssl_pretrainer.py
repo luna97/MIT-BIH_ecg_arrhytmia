@@ -5,7 +5,7 @@ import torchmetrics.classification
 import torchmetrics.classification.accuracy
 import torchmetrics.classification.precision_recall
 import torchmetrics.classification.specificity
-from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss, masked_min_max_loss
+from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss, masked_min_max_loss, ccc_loss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn import functional as F
 from utils.plot_utils import plot_reconstruction, plot_generation
@@ -42,6 +42,9 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         self.num_epochs_warmup = config.num_epochs_warmup
         self.num_epochs_warm_restart = config.num_epochs_warm_restart
         self.sched_decay_factor = config.sched_decay_factor
+        self.grad_loss_lambda = config.grad_loss_lambda
+        self.min_max_loss_lambda = config.min_max_loss_lambda
+        self.ccc_loss_lambda = config.ccc_loss_lambda
         if not config.is_sweep:
             self.save_hyperparameters()
 
@@ -63,19 +66,30 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         When the training loop ends, some representative plots from different classes are saved on wandb
         """
         sample_1 = self.trainer.train_dataloader.dataset[0]
-        sample_2 = self.trainer.train_dataloader.dataset[87]
+        sample_2 = self.trainer.train_dataloader.dataset[-42]
+
+        # get two random samples from the training dataset
+        idx_3 = np.random.randint(0, len(self.trainer.train_dataloader.dataset))
+        idx_4 = np.random.randint(0, len(self.trainer.train_dataloader.dataset))
+
+        sample_3 = self.trainer.train_dataloader.dataset[idx_3]
+        sample_4 = self.trainer.train_dataloader.dataset[idx_4]
 
         log_dir = self.logger.log_dir if self.logger.log_dir is not None else self.logger.experiment.dir
 
         img_1 = plot_reconstruction(sample_1, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_1')
         img_2 = plot_reconstruction(sample_2, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_2')
+        img_3 = plot_reconstruction(sample_3, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_3_random')
+        img_4 = plot_reconstruction(sample_4, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_4_random')
         if isinstance(self.logger, lightning.pytorch.loggers.WandbLogger):
-            self.logger.log_image(key="reconstructions_train", images=[img_1, img_2])
+            self.logger.log_image(key="reconstructions_train", images=[img_1, img_2, img_3, img_4])
         
         img_1 = plot_generation(sample_1, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_1')
         img_2 = plot_generation(sample_2, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_2')
+        img_3 = plot_generation(sample_3, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_3_random')
+        img_4 = plot_generation(sample_4, self.model, self.patch_size, self.device, log_dir, self.current_epoch, 'sample_4_random')
         if isinstance(self.logger, lightning.pytorch.loggers.WandbLogger):
-            self.logger.log_image(key="generations_train", images=[img_1, img_2])
+            self.logger.log_image(key="generations_train", images=[img_1, img_2, img_3, img_4])
 
         return super().on_train_epoch_end()
 
@@ -121,16 +135,19 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         x = F.pad(x, (0, 0, 0, self.patch_size - x.shape[1] % self.patch_size))
 
         reconstruction = self.model.reconstruct(x, tab_data)
+        #print('reconstruction shape', reconstruction.shape)
         nrmse = np.inf
 
         shift_x = x[:, self.patch_size:].squeeze()
         shift_reconstruct = reconstruction[:, :-self.patch_size]
+        #print('shift_reconstruct shape', shift_reconstruct.shape)
 
         # compute the loss and use the gradients only when it is needed
         if 'min_max' in self.loss_type:
             min_max = masked_min_max_loss(shift_reconstruct, shift_x, patch_size=self.patch_size)
-        # else:
-        #    with torch.no_grad(): min_max = masked_min_max_loss(shift_reconstruct, shift_x, patch_size=self.patch_size)
+       
+        if 'ccc' in self.loss_type:
+            ccc = ccc_loss(shift_reconstruct, shift_x)
 
         if 'mae' in self.loss_type:
             mae = (shift_reconstruct, shift_x)
@@ -146,6 +163,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
             mse = masked_mse_loss(shift_reconstruct, shift_x, reduction='mean')
         else:
             with torch.no_grad(): mse = masked_mse_loss(shift_reconstruct, shift_x, reduction='mean')
+
         
    
         # calculate the normalized root squared error only for the first token prediction
@@ -157,14 +175,17 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         self.log(f"{step}_mae", mae.item(), prog_bar=False, batch_size=self.batch_size)
         self.log(f"{step}_grad", grad.item(), prog_bar=False, batch_size=self.batch_size)
         if 'min_max' in self.loss_type: self.log(f"{step}_min_max", min_max.item(), prog_bar=False, batch_size=self.batch_size)
+        if 'ccc' in self.loss_type: self.log(f"{step}_ccc", ccc.item(), prog_bar=True, batch_size=self.batch_size)
+
         self.log(f"{step}_nrmse", nrmse.mean().item(), prog_bar=True, batch_size=self.batch_size)
         
         loss = torch.tensor(0.0, device=self.device)
         if 'mae' in self.loss_type: loss += mae
         elif 'mse' in self.loss_type: loss += mse
 
-        if 'grad' in self.loss_type: loss += grad
-        if 'min_max' in self.loss_type: loss += min_max
+        if 'grad' in self.loss_type: loss += grad * self.grad_loss_lambda
+        if 'min_max' in self.loss_type: loss += min_max * self.min_max_loss_lambda
+        if 'ccc' in self.loss_type: loss += ccc * self.ccc_loss_lambda
 
         self.log(f"{step}_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
         return loss

@@ -62,7 +62,7 @@ def plot_reconstruction(sample, model, patch_size, device, logdir, epoch, name):
             for j in range(0, shift_x.shape[1], patch_size):
                 ax.axvline(j, color='gray', linestyle='--', linewidth=0.5)
 
-            ax.set_yticks([])
+            # ax.set_yticks([])
             if i == 0:
                 if has_augmentation:
                     ax.legend(['Original', 'Reconstructed', 'Augmented'], loc='upper left')
@@ -111,7 +111,7 @@ def plot_generation(sample, model, patch_size, device, logdir, epoch, name):
             for j in range(0, signal.shape[1] + generated.shape[1], patch_size):
                 ax.axvline(j, color='gray', linestyle='--', linewidth=0.5)
 
-            ax.set_yticks([])
+            # ax.set_yticks([])
             if i == 0:
                 ax.legend(['Original', 'Generated'], loc='upper left')
 

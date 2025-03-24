@@ -1,4 +1,7 @@
 import torch
+import torch.nn.functional as F
+from torchmetrics.regression import ConcordanceCorrCoef
+
 
 def masked_mse_loss(input, target, reduction='mean'):
     out = (input - target)**2
@@ -53,6 +56,25 @@ def gradient_loss(input, target, reduction='mean', p=2):
     # do not consider elements that was at 0 in the input
     # using [:, :-1] because preserve the order of the elements
     out = out[target[:, :-1] != 0]
+    if reduction == "mean":
+        return out.mean()
+    elif reduction == "none":
+        return out
+ 
+def ccc_loss(input, target, reduction='mean'):
+    input = input.reshape(input.shape[0], -1)
+    # normalize input
+    input = (input - input.mean(dim=1).unsqueeze(1)) / (input.std(dim=1).unsqueeze(1) + 1e-5)
+    target = target.reshape(target.shape[0], -1)
+    # normalize target
+    target = (target - target.mean(dim=1).unsqueeze(1)) / (target.std(dim=1).unsqueeze(1) + 1e-5)
+    ccc = ConcordanceCorrCoef(num_outputs=input.shape[1]).to(input.device)
+    # [256, 3584, 12]
+    # flatten the last two dimensions
+
+    out = 1 - ccc(input, target)
+    # out = out[target != 0]
+
     if reduction == "mean":
         return out.mean()
     elif reduction == "none":

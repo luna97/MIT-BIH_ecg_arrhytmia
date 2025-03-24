@@ -26,18 +26,23 @@ parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
 parser.add_argument('--patch_size', type=int, default=64, help='Patch size')
 parser.add_argument('--dropout', type=float, default=0.3, help='Dropout')
 parser.add_argument('--embedding_size', type=int, default=64, help='Embedding size')
-parser.add_argument('--loss_type', type=str, default='mse', help='Loss type')
 parser.add_argument('--deterministic', action='store_true', help='Deterministic training')
 parser.add_argument('--use_tab_data', action='store_true', help='Use tabular data')
 parser.add_argument('--patience', type=int, default=10, help='Patience for the early stopping')
 parser.add_argument('--is_sweep', action='store_true', help='Is a sweep')
 parser.add_argument('--grad_clip', type=float, default=5, help='Gradient clipping value')
 
+# losses params
+parser.add_argument('--loss_type', type=str, default='mse', help='Loss type, mse, mae, grad, min_max or a composition of them')
+parser.add_argument('--grad_loss_lambda', type=float, default=1., help='Lambda for the contrastive loss')
+parser.add_argument('--min_max_loss_lambda', type=float, default=1., help='Lambda for the contrastive loss')
+parser.add_argument('--ccc_loss_lambda', type=float, default=1., help='Lambda for the correlation loss')
+
 # optimize and scheduler
 parser.add_argument('--optimizer', type=str, default='adamw', help='Optimizer')
 parser.add_argument('--use_scheduler', action='store_true', help='Use the scheduler for the optimizer')
 parser.add_argument('--num_epochs_warmup',  type=int, default=2, help='Number of warmup epoch for the scheduler')
-parser.add_argument('--num_epochs_warm_restart',  type=int, default=5, help='Number of epoch before restarting the scheduler')
+parser.add_argument('--num_epochs_warm_restart',  type=int, default=10, help='Number of epoch before restarting the scheduler')
 parser.add_argument('--sched_decay_factor', type=float, default=0.8, help='Decay factor for the scheduler')
 
 # model hyperparameters
@@ -48,6 +53,8 @@ parser.add_argument('--num_heads', type=int, default=4, help='Number of heads fo
 parser.add_argument('--xlstm_type', type=str, default='original', help='Type of xLSTM to use')
 parser.add_argument('--weight_tying', action='store_true', help='Weight tying')
 parser.add_argument('--patch_embedding', default='linear', help='Patch embedding type')
+parser.add_argument('--reconstruct_embedding', default='linear', help='Reconstruction head type')
+parser.add_argument('--bidirectional', action='store_true', help='Bidirectional LSTM')
 
 
 # data and augmentations hyperparameters

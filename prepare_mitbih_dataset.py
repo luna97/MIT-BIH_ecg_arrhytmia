@@ -63,6 +63,103 @@ def get_other_window(signal, r_p, window_size, num_windows, start, end):
         windows.append((start_window, end_window))
     return windows
 
+def get_extra_annotation(start, end, annotation_positions, extra_labels):
+    anns = []
+    for i, pos in enumerate(annotation_positions):
+        if start < pos <= end:
+            anns.append(extra_labels[i].strip())
+    return '_'.join(anns) if anns else ''
+
+def get_sample_row(start, end, signal, label, r_p, r_peaks, annotation_positions, extra_labels, patient, i, age, is_male):
+        # Ensure valid indices
+        start = min(max(0, int(start)), len(signal))
+        end = min(max(0, int(end)), len(signal))
+
+        class_label = convert_label(label)
+
+
+        window_size = 10 * 360
+        start_window, end_window = get_centered_window(signal, r_p, window_size, start, end)
+        extra_annotations = get_extra_annotation(start_window, end_window, annotation_positions, extra_labels)
+        r_peaks_in_window = np.array([ r for r in r_peaks if start_window <= r <= end_window])
+
+        row_data = {
+            'patient': patient,
+            'sample_id': i,
+            'orig_label': label,
+            'label': class_label,
+            'hb_start': start,
+            'hb_end': end,
+            'r_peak': r_p,
+            'is_oversampled': False,
+            'win_start': start_window,
+            'win_end': end_window,
+            'age': age,
+            'is_male': is_male,
+            'extra_annotations': extra_annotations,
+            'r_peak_interval_mean': np.mean((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
+            'r_peak_variance': np.std((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
+        }
+        return row_data
+
+def split_between_hb(signal, r_peaks, patient, labels, annotation_positions, extra_labels, age, is_male):
+    all_data = []
+    start, end = 0, 0
+    for i, r_p in enumerate(r_peaks):
+        if i == len(r_peaks) - 1:
+            end = len(signal)
+        else:
+            end = r_peaks[i + 1]
+
+        if i == 0:
+            start = 0
+        else:
+            start = r_peaks[i - 1]
+
+        row_data = get_sample_row(start, end, signal, labels[i], r_p, r_peaks, annotation_positions, extra_labels, patient, i, age, is_male)
+        all_data.append(row_data)
+    return all_data
+        
+
+def split_t_wave(signal, r_peaks, patient, labels, annotation_positions, extra_labels, age, is_male):
+    """
+    Segment the signal into T-wave windows
+    """
+    all_data = []
+    # Handle potential errors during delineation
+    try:
+        _, waves_peak = nk.ecg_delineate(
+            signal,
+            rpeaks=r_peaks,  # Use filtered r_peaks
+            method='dwt',
+            sampling_rate=360,
+            show=False,
+        )
+        t_offsets = waves_peak['ECG_T_Offsets']
+            # Ensure t_offsets has the same length as filtered r_peaks
+        if len(t_offsets) < len(r_peaks):
+            t_offsets = np.concatenate([t_offsets, np.full(len(r_peaks)-len(t_offsets), np.nan)]) # Pad with NaNs
+    except Exception as e:
+        print(f"Error delineating patient {patient}: {e}")
+            # Keep t_offsets as all NaNs, processing will continue with median strategy
+
+    start, end = 0, 0
+    for i, (r_p, t_o) in enumerate(zip(r_peaks, t_offsets)):
+
+        # Determine window  end
+        if i == len(r_peaks) - 1:
+            # if last peak assign end to the end of the signal
+            end = len(signal)
+        elif np.isnan(t_o):
+            # if the t-wave offset is not available, use the half distance to the next peak
+            if i + 1 < len(r_peaks): end = (r_p + r_peaks[i + 1]) // 2  
+            else: end = len(signal)  # Handle last peak
+        else:
+            end = int(t_o)  # Ensure integer index
+        
+        row_data = get_sample_row(start, end, signal, labels[i], r_p, r_peaks, annotation_positions, extra_labels, patient, i, age, is_male)
+        all_data.append(row_data)
+
 
 def process_patient(patient, data_folder, split, hb_split_type, name, nk_clean):
     """
@@ -101,23 +198,7 @@ def process_patient(patient, data_folder, split, hb_split_type, name, nk_clean):
     # T-wave delineation (only if needed)
     t_offsets = [np.nan] * len(r_peaks)  # Initialize with NaNs
     cleaned_signal = nk.ecg_clean(signal, sampling_rate=360)
-    if hb_split_type == 't_wave':
-        # Handle potential errors during delineation
-        try:
-            _, waves_peak = nk.ecg_delineate(
-                cleaned_signal,
-                rpeaks=r_peaks,  # Use filtered r_peaks
-                method='dwt',
-                sampling_rate=360,
-                show=False,
-            )
-            t_offsets = waves_peak['ECG_T_Offsets']
-             # Ensure t_offsets has the same length as filtered r_peaks
-            if len(t_offsets) < len(r_peaks):
-                t_offsets = np.concatenate([t_offsets, np.full(len(r_peaks)-len(t_offsets), np.nan)]) # Pad with NaNs
-        except Exception as e:
-            print(f"Error delineating patient {patient}: {e}")
-            # Keep t_offsets as all NaNs, processing will continue with median strategy
+
     if nk_clean:
         # write the cleaned signal
         resample_and_save_record_wfdb(
@@ -127,108 +208,12 @@ def process_patient(patient, data_folder, split, hb_split_type, name, nk_clean):
             nk_clean=nk_clean
         )
 
-    start = 0
-    end = 0
-    for i, (r_p, t_o) in enumerate(zip(r_peaks, t_offsets)):
-        prev_end = end
-
-        # Determine window  end
-        if i == len(r_peaks) - 1:
-            # if last peak assign end to the end of the signal
-            end = len(signal)
-        elif np.isnan(t_o):
-            # if the t-wave offset is not available, use the half distance to the next peak
-            if i + 1 < len(r_peaks): end = (r_p + r_peaks[i + 1]) // 2  
-            else: end = len(signal)  # Handle last peak
-        else:
-            end = int(t_o)  # Ensure integer index
-
-
-        # Ensure window is at least 400 samples long in each direction
-        if r_p - start > 160:
-            start = r_p - 160
-            if i > 0 and start < r_peaks[i - 1]:
-                start = r_peaks[i - 1] + 60
-        if end - r_p > 220:
-            end = r_p + 220
-            if i + 1 < len(r_peaks) and end > r_peaks[i + 1]:
-                end = r_peaks[i + 1] - 60
+    if hb_split_type == 't_wave':
+        return split_t_wave(cleaned_signal, r_peaks, patient, labels, annotation_positions, extra_labels, age, is_male)
+    elif hb_split_type == 'between_hb':
         
-        start = max(0, int(start))  # Ensure valid indices
-        end = max(0, int(end))
 
-        class_label = convert_label(labels[i])
-
-        def get_extra_annotation(start, end, annotation_positions, extra_labels):
-            anns = []
-            for i, pos in enumerate(annotation_positions):
-                if start < pos <= end:
-                    anns.append(extra_labels[i].strip())
-            return '_'.join(anns) if anns else ''
-
-        window_size = 10 * 360
-        start_window, end_window = get_centered_window(
-            signal, r_p, window_size, start, end)
-        extra_annotations = get_extra_annotation(
-            start_window, end_window, annotation_positions, extra_labels)
-        r_peaks_in_window = np.array([ r for r in r_peaks if start_window <= r <= end_window])
-
-        row_data = {
-            'patient': patient,
-            'sample_id': i,
-            'orig_label': labels[i],
-            'label': class_label,
-            'hb_start': start,
-            'hb_end': end,
-            'r_peak': r_p,
-            'is_oversampled': False,
-            'win_start': start_window,
-            'win_end': end_window,
-            'age': age,
-            'is_male': is_male,
-            'extra_annotations': extra_annotations,
-            'r_peak_interval_mean': np.mean((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
-            'r_peak_variance': np.std((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
-        }
-        all_data.append(row_data)
-
-
-        if split == 'test':
-            continue
-
-        window_to_add = 0
-        if class_label == 'V':
-            window_to_add = 2
-        elif class_label == 'S':
-            window_to_add = 6
-        elif class_label == 'F':
-            window_to_add = 8
-        elif class_label == 'Q':
-            window_to_add = 12
-
-        for start_window, end_window in get_other_window(signal, r_p, window_size, window_to_add, start, end):
-            extra_annotations = get_extra_annotation(
-                start_window, end_window, annotation_positions, extra_labels)
-            r_peaks_in_window = np.array([ r for r in r_peaks if start_window <= r <= end_window])
-
-            row_data = {
-                'patient': patient,
-                'sample_id': i,  # Use original sample_id
-                'orig_label': labels[i],
-                'label': class_label,
-                'hb_start': start,
-                'hb_end': end,
-                'r_peak': r_p,
-                'is_oversampled': True,
-                'win_start': start_window,
-                'win_end': end_window,
-                'age': age,
-                'is_male': is_male,
-                'extra_annotations': extra_annotations,
-                'r_peak_interval_mean': np.mean((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
-                'r_peak_variance': np.std((r_peaks_in_window[1:] - r_peaks_in_window[:-1]) / 360),
-            }
-            all_data.append(row_data)
+    
 
     return all_data
 

@@ -35,6 +35,10 @@ class TrainingxLSTMNetwork(L.LightningModule):
         self.train_f1 = torchmetrics.classification.MulticlassF1Score(num_classes=num_classes, top_k=1, average='macro')
         self.valid_f1 = torchmetrics.classification.MulticlassF1Score(num_classes=num_classes, top_k=1, average='macro')
         self.test_f1 = torchmetrics.classification.MulticlassF1Score(num_classes=num_classes, top_k=1, average=None)
+        self.train_auroc = torchmetrics.classification.AUROC(num_classes=num_classes, compute_on_step=False)
+        self.valid_auroc = torchmetrics.classification.AUROC(num_classes=num_classes, compute_on_step=False)
+        self.test_auroc = torchmetrics.classification.AUROC(num_classes=num_classes, compute_on_step=False)
+
         # add sensitivity and specificity for the first class
         self.val_spec = torchmetrics.classification.specificity.MulticlassSpecificity(num_classes=num_classes, average=None)
         self.test_spec = torchmetrics.classification.specificity.MulticlassSpecificity(num_classes=num_classes, average=None)
@@ -46,12 +50,17 @@ class TrainingxLSTMNetwork(L.LightningModule):
             self.save_hyperparameters()
 
     def training_step(self, batch, _):
-        loss, contrastive_loss, _, preds = self.predict_batch(batch)
+        loss, contrastive_loss, out, preds = self.predict_batch(batch)
         self.train_acc(preds, batch['label'])
         self.train_f1(preds, batch['label'])
         self.log('train_loss', loss.item(), prog_bar=True, batch_size=self.batch_size)
         self.log('train_acc', self.train_acc, prog_bar=True, batch_size=self.batch_size)
         self.log('train_f1', self.train_f1, prog_bar=True, batch_size=self.batch_size)
+
+        # auroc
+        self.train_auroc = self.train_auroc.to(out.device)
+        self.train_auroc(out, batch['label'])
+        self.log("train_auroc", self.train_auroc, batch_size=self.batch_size)
 
         if self.contrastive_loss_lambda > 0:
             self.log('train_contrastive_loss', contrastive_loss.item(), prog_bar=True, batch_size=self.batch_size)
@@ -60,7 +69,7 @@ class TrainingxLSTMNetwork(L.LightningModule):
             return loss
     
     def validation_step(self, batch, _):
-        loss, contrastive_loss, _, preds = self.predict_batch(batch)
+        loss, contrastive_loss, out, preds = self.predict_batch(batch)
         self.valid_acc(preds, batch['label'])
         self.valid_f1(preds, batch['label'])
         self.log('val_loss', loss.item(), prog_bar=True, batch_size=self.batch_size)
@@ -70,7 +79,7 @@ class TrainingxLSTMNetwork(L.LightningModule):
         # specificity
         self.val_spec = self.val_spec.to(preds.device)
         self.val_spec(preds, batch['label'])
-        self.log('val_specificity/N', self.val_spec[0], prog_bar=True, batch_size=self.batch_size, metric_attribute='val_spec')
+        self.log('val_specificity/N', self.val_spec[0], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_spec')
         self.log('val_specificity/S', self.val_spec[1], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_spec')
         self.log('val_specificity/V', self.val_spec[2], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_spec')
         self.log('val_specificity/F', self.val_spec[3], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_spec')
@@ -80,10 +89,10 @@ class TrainingxLSTMNetwork(L.LightningModule):
         self.val_recall = self.val_recall.to(preds.device)
         self.val_recall(preds, batch['label'])
         self.log('val_sensitivity/N', self.val_recall[0], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_recall')
-        self.log('val_sensitivity/S', self.val_recall[1], prog_bar=True, batch_size=self.batch_size, metric_attribute='val_recall')
-        self.log('val_sensitivity/V', self.val_recall[2], prog_bar=True, batch_size=self.batch_size, metric_attribute='val_recall')
-        self.log('val_sensitivity/F', self.val_recall[3], prog_bar=True, batch_size=self.batch_size, metric_attribute='val_recall')
-        self.log('val_sensitivity/Q', self.val_recall[4], prog_bar=True, batch_size=self.batch_size, metric_attribute='val_recall')
+        self.log('val_sensitivity/S', self.val_recall[1], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_recall')
+        self.log('val_sensitivity/V', self.val_recall[2], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_recall')
+        self.log('val_sensitivity/F', self.val_recall[3], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_recall')
+        self.log('val_sensitivity/Q', self.val_recall[4], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_recall')
 
         # ppv
         self.val_precision = self.val_precision.to(preds.device)
@@ -94,6 +103,11 @@ class TrainingxLSTMNetwork(L.LightningModule):
         self.log('val_ppv/F', self.val_precision[3], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_precision')
         self.log('val_ppv/Q', self.val_precision[4], prog_bar=False, batch_size=self.batch_size, metric_attribute='val_precision')
 
+        # auroc
+        self.valid_auroc = self.valid_auroc.to(out.device)
+        self.valid_auroc(out, batch['label'])
+        self.log('val_auroc', self.valid_auroc, prog_bar=True, batch_size=self.batch_size)
+
         if self.contrastive_loss_lambda > 0:
             self.log('val_contrastive_loss', contrastive_loss.item(), prog_bar=True, batch_size=self.batch_size)
             return loss + contrastive_loss * self.contrastive_loss_lambda
@@ -101,7 +115,7 @@ class TrainingxLSTMNetwork(L.LightningModule):
             return loss
             
     def test_step(self, batch, _):
-        loss, contrastive_loss, _, preds = self.predict_batch(batch)
+        loss, contrastive_loss, out, preds = self.predict_batch(batch)
 
         self.test_acc = self.test_acc.to(preds.device)
         self.test_acc(preds, batch['label'])
@@ -157,6 +171,11 @@ class TrainingxLSTMNetwork(L.LightningModule):
         self.log("test_ppv/F", self.test_precision[3], batch_size=self.batch_size, metric_attribute='test_precision')
         self.log("test_ppv/Q", self.test_precision[4], batch_size=self.batch_size, metric_attribute='test_precision')
 
+        # auroc  
+        self.test_auroc = self.test_auroc.to(out.device)
+        self.test_auroc(out, batch['label'])
+        self.log("test_auroc", self.test_auroc, batch_size=self.batch_size)
+
         if self.contrastive_loss_lambda > 0:
             # self.log("test_contrastive_loss", contrastive_loss.item(), batch_size=self.batch_size)
             return loss + contrastive_loss * self.contrastive_loss_lambda
@@ -184,7 +203,7 @@ class TrainingxLSTMNetwork(L.LightningModule):
             {'params': self.model.fc.parameters(), 'lr': self.lr_head, 'weight_decay': self.wd},
             {'params': self.model.sep_token, 'lr': self.lr_head, 'weight_decay': self.wd},
             {'params': self.model.cls_token, 'lr': self.lr_head, 'weight_decay': self.wd},
-            {'params': self.model.start_token, 'lr': self.lr_head, 'weight_decay': self.wd},
+            # {'params': self.model.start_token, 'lr': self.lr_head, 'weight_decay': self.wd},
 
             # xlstm and patch embedding with lower lr
             {'params': self.model.xlstm.parameters(), 'lr': self.lr_xlstm, 'weight_decay': self.wd},

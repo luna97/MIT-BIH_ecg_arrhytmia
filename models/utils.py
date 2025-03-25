@@ -11,7 +11,7 @@ import os
 def get_patch_embedding(type, patch_size, num_hiddens, num_channels):
     if type == 'linear':
         print('using linear patch embedding')
-        return LinearPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens)
+        return LinearPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens, num_channels=num_channels)
     if type == 'conv':
         print('using conv patch embedding')
         return ConvPatchEmbedding(patch_size=patch_size, num_hiddens=num_hiddens, num_channels=num_channels)
@@ -69,7 +69,8 @@ def get_xlstm(
             mlstm=mLSTMLayerConfig(
                 conv1d_kernel_size=4, 
                 qkv_proj_blocksize=num_heads, 
-                num_heads=num_heads
+                num_heads=num_heads,
+                proj_factor=1
             )
         ),
         slstm_block=sLSTMBlockConfig(

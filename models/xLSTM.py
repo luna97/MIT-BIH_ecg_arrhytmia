@@ -22,25 +22,22 @@ class myxLSTM(nn.Module):
         self.weight_tying = config.weight_tying
         self.bidirectional = config.bidirectional
 
-        self.is_unet = config.patch_embedding == 'unet' and config.reconstruct_embedding == 'unet'
-
-
         self.activation = get_activation_fn(config.activation_fn)
 
         self.patch_embedding = get_patch_embedding(config.patch_embedding, config.patch_size, config.embedding_size, num_channels)
         self.sep_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
         self.cls_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
-        self.start_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
+        # self.start_token = nn.Parameter(torch.randn(1, 1, config.embedding_size))
 
-        xlstm_emb_size = config.embedding_size if not self.is_unet else config.embedding_size // 4
+        xlstm_emb_size = config.embedding_size
         if config.xlstm_type == 'large':
-            self.xlstm = get_large_xlstm(xlstm_emb_size, dropout=config.dropout)
+            self.xlstm = get_large_xlstm(xlstm_emb_size, dropout=config.dropout, blocks=config.xlstm_config, num_heads=config.num_heads)
         else:
             self.xlstm = get_xlstm(xlstm_emb_size, dropout=config.dropout, blocks=config.xlstm_config, num_heads=config.num_heads)
 
         if self.bidirectional:
             if config.xlstm_type == 'large':
-                self.xlstm_bi = get_large_xlstm(xlstm_emb_size, dropout=config.dropout)
+                self.xlstm_bi = get_large_xlstm(xlstm_emb_size, dropout=config.dropout, blocks=config.xlstm_config, num_heads=config.num_heads)
             else:
                 self.xlstm_bi = get_xlstm(xlstm_emb_size, dropout=config.dropout, blocks=config.xlstm_config, num_heads=config.num_heads)            
 
@@ -63,27 +60,6 @@ class myxLSTM(nn.Module):
         if self.weight_tying and config.patch_embedding == 'linear' and config.reconstruct_embedding == 'linear': 
             self.reconstruction.deconv.weight = self.patch_embedding.conv.weight
 
-        if self.use_tab_data:
-            self.tab_embeddings = TabularEmbeddings([
-                FeatureSpec('age', 11, torch.int64, category_size=10),
-                FeatureSpec('is_male', 2, torch.bool),                
-                FeatureSpec('RBBB', 2, torch.bool),
-                FeatureSpec('LBBB', 2, torch.bool),
-                FeatureSpec('SB', 2, torch.bool), # Sinus Bradycardia
-                FeatureSpec('ST', 2, torch.bool), # Sinus Tachycardia
-                FeatureSpec('AF', 2, torch.bool), # Atrial Fibrillation
-                FeatureSpec('1dAVb', 2, torch.bool), # first degree AV block, not present in the mit_bih dataset
-                FeatureSpec('Hypertension', 2, torch.bool), # 
-                FeatureSpec('Ischaemic disease', 2, torch.bool), # 
-                FeatureSpec('Pulmonary Heart', 2, torch.bool), #
-                FeatureSpec('Cerebrovascular diseases', 2, torch.bool), #
-                FeatureSpec('Arteries diseases', 2, torch.bool), # 
-                FeatureSpec('Veins diseases', 2, torch.bool), #
-                FeatureSpec('Heart Failure', 2, torch.bool), #
-                FeatureSpec('Cardiomiopathy', 2, torch.bool), #
-                FeatureSpec('Rheumatic disease', 2, torch.bool), #
-            ], num_hiddens=config.embedding_size, dropout=config.dropout)
-
     def embed_data(self, x, tab_data, augment=True):
         if augment:
             x = self.random_drop_leads(x)
@@ -92,8 +68,6 @@ class myxLSTM(nn.Module):
 
         x = x.permute(0, 2, 1) # put the channels in the middle
         x = self.patch_embedding(x)
-        if self.is_unet:
-            x, x1, x2, x3 = x
 
 
         if self.use_tab_data and tab_data is not None:
@@ -105,16 +79,11 @@ class myxLSTM(nn.Module):
                 x = torch.cat([tab_emb, x], dim=1)
                 return x, num_embeddings
         
-        if self.is_unet:
-            return (x, x1, x2, x3), 0
         
         return x, 0
 
     def reconstruct(self, x, tab_data):
         x, tab_embeddings = self.embed_data(x, tab_data)
-
-        if self.is_unet:
-            x, x1, x2, x3 = x
 
         out = self.xlstm(x)
 
@@ -125,11 +94,8 @@ class myxLSTM(nn.Module):
         if self.bidirectional:
             out = self.get_bidirectional_emb(x, out, tab_embeddings)
 
-        
-        if self.is_unet:
-            out = self.reconstruction(out, x1, x2, x3)
-        else:
-            out = self.reconstruction(out)
+
+        out = self.reconstruction(out)
 
         return out
     
@@ -147,8 +113,6 @@ class myxLSTM(nn.Module):
         # i do not need to drop the leads here
         x, num_emb = self.embed_data(x, tab_data, augment=False)
 
-        if self.is_unet:
-            x, x1, x2, x3 = x
 
         state = None
         for i in range(x.shape[1]):
@@ -157,33 +121,17 @@ class myxLSTM(nn.Module):
         if self.bidirectional:
             new_x = torch.cat([new_x, torch.zeros_like(new_x)], dim=-1)
 
-        if self.is_unet:
-            # print('shape x3', x3.shape)
-            r = self.reconstruction(
-                new_x, 
-                x1[:, i, :].unsqueeze(0),
-                x2[:, i, :].unsqueeze(0), 
-                None
-                # x3[i, :].unsqueeze(0)
-            )
-        else:
-            r = self.reconstruction(new_x)
-
+        r = self.reconstruction(new_x)
         reconstructed = [r]
 
         for i in range(length - 1):
             x, _ = self.embed_data(r, None, augment=False)
-            if self.is_unet:
-                x, x1, x2, x3 = x
             x, state = self.xlstm.step(x, state=state)
 
             if self.bidirectional:
                 x = torch.cat([x, torch.zeros_like(x)], dim=-1)
 
-            if self.is_unet:
-                r = self.reconstruction(x, x1, x2, x3)
-            else:
-                r = self.reconstruction(x)
+            r = self.reconstruction(x)
 
             reconstructed.append(r)
         
@@ -197,14 +145,12 @@ class myxLSTM(nn.Module):
         # add the separation token between the context and the input
         sep_token = self.sep_token.repeat(x.shape[0], 1, 1)
         cls_token = self.cls_token.repeat(x.shape[0], 1, 1)
-        start_token = self.start_token.repeat(x.shape[0], 1, 1)
 
-        x = torch.cat([start_token, ctx, sep_token, x, cls_token], dim=1)
+        x = torch.cat([ctx, sep_token, x, cls_token], dim=1)
         # get the last hidden state and apply the head
         out = self.xlstm(x) # [batch_size, embedding_dim]
 
         cls_token = out[:, -1, :]
-
 
         if self.bidirectional:
             out_bi = self.xlstm_bi(x.flip(1))

@@ -9,6 +9,7 @@ import dataset.mimic_iv as mimic
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from trainers.ssl_pretrainer import PretrainedxLSTMNetwork
 import sys
+import torch
 
 # for debug:
 # python3 pretrain.py --epochs 100 --dropout 0.2 --activation_fn relu --batch_size 64 --patch_size 64 --embedding_size 128 --use_scheduler --lr 0.0001 --wd 0.01 --deterministic --xlstm_config m --loss_type mse_grad_min_max --num_workers 32 --nk_clean --pretrain_datasets code15 --random_shift --leads I II III aVR aVL aVF V1 V2 V3 V4 V5 V6 --normalize --random_drop_leads 0.2
@@ -30,13 +31,14 @@ parser.add_argument('--deterministic', action='store_true', help='Deterministic 
 parser.add_argument('--use_tab_data', action='store_true', help='Use tabular data')
 parser.add_argument('--patience', type=int, default=10, help='Patience for the early stopping')
 parser.add_argument('--is_sweep', action='store_true', help='Is a sweep')
-parser.add_argument('--grad_clip', type=float, default=5, help='Gradient clipping value')
+parser.add_argument('--grad_clip', type=float, default=0.5, help='Gradient clipping value')
 
 # losses params
 parser.add_argument('--loss_type', type=str, default='mse', help='Loss type, mse, mae, grad, min_max or a composition of them')
 parser.add_argument('--grad_loss_lambda', type=float, default=1., help='Lambda for the contrastive loss')
 parser.add_argument('--min_max_loss_lambda', type=float, default=1., help='Lambda for the contrastive loss')
 parser.add_argument('--ccc_loss_lambda', type=float, default=1., help='Lambda for the correlation loss')
+parser.add_argument('--auto_correlation_loss_lambda', type=float, default=1., help='Lambda for the masked mae loss')
 
 # optimize and scheduler
 parser.add_argument('--optimizer', type=str, default='adamw', help='Optimizer')
@@ -75,12 +77,11 @@ parser.add_argument('--data_folder_code15', type=str, default='/media/Volume/dat
 parser.add_argument('--labels_file_code15', type=str, default='/media/Volume/data/CODE15/exams.csv', help='Labels file for code15 dataset')
 parser.add_argument('--data_folder_mimic', type=str, default='/media/Volume/data/MIMIC_IV/nkclean_360_12l', help='Data folder for MIMIC dataset')
 parser.add_argument('--labels_file_mimic', type=str, default='/media/Volume/data/MIMIC_IV/records_w_diag_icd10_labelled.csv', help='Labels file for MIMIC dataset')
+parser.add_argument('--checkpoint', type=str, default=None, help='Path to save the checkpoints')
 
 def pretrain(config, run=None, wandb=False):
     max_cpus = int(os.getenv("SLURM_CPUS_PER_TASK", config.num_workers))
     config.num_workers = min(config.num_workers, max_cpus)
-
-
 
     # set deterministic training
     if config.deterministic: L.seed_everything(42)
@@ -111,7 +112,10 @@ def pretrain(config, run=None, wandb=False):
     test_dataloader = utils.data.DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=mit_bih.collate_fn, num_workers=config.num_workers)
     
     xlstm = myxLSTM(config=config, num_classes=5, num_channels=len(config.leads))
-    model = PretrainedxLSTMNetwork(model=xlstm, len_train_dataset=len_train_dataset, config=config)
+    if config.checkpoint != None:
+        model = PretrainedxLSTMNetwork.load_from_checkpoint(checkpoint_path=config.checkpointg)
+    else:
+        model = PretrainedxLSTMNetwork(model=xlstm, len_train_dataset=len_train_dataset, config=config)
         
     checkpoint_callback = ModelCheckpoint(monitor='val_nrmse')
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -130,5 +134,6 @@ def pretrain(config, run=None, wandb=False):
 
 # if main
 if __name__ == '__main__':
+    torch.set_float32_matmul_precision('medium')
     args = parser.parse_args()
     pretrain(args, wandb=args.wandb_log)

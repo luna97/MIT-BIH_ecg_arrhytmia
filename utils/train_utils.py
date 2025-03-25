@@ -60,6 +60,19 @@ def gradient_loss(input, target, reduction='mean', p=2):
         return out.mean()
     elif reduction == "none":
         return out
+    
+
+def auto_correlation_loss(input, target, convolution, reduction='mean'):
+    conv_input = convolution(input.transpose(1,2))
+    conv_target = convolution(target.transpose(1,2))
+
+    out = (conv_input - conv_target) ** 2
+    if reduction == "mean":
+        return out.mean()
+    elif reduction == "none":
+        return out
+
+
  
 def ccc_loss(input, target, reduction='mean'):
     input = input.reshape(input.shape[0], -1)

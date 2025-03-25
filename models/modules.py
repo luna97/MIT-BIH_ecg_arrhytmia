@@ -48,11 +48,10 @@ class ConvPatchEmbedding(nn.Module):
         self.linear = nn.Linear(out_size, num_hiddens)
 
     def forward(self, x):
-        # print('x shape', x.shape)
         # transform [bs, n_channels, n_samples] -> [bs, n_channels, n_patches, patch_size]
         x = x.unfold(2, self.patch_size, self.patch_size).transpose(1, 2)
         batch_size, n_patches, n_channels, _ = x.shape
-        x = x.view(-1, n_channels, self.patch_size) # [bs * n_patches, n_channels, patch_size]
+        x = x.reshape(-1, n_channels, self.patch_size) # [bs * n_patches, n_channels, patch_size]
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.activation(x)
@@ -69,7 +68,7 @@ class ConvPatchEmbedding(nn.Module):
         # print('x shape after conv', x.shape)
         x = self.linear(x)
 
-        x = x.view(batch_size, n_patches, -1)
+        x = x.reshape(batch_size, n_patches, -1)
 
         # print('x shape after unfold', x.shape)
         return x

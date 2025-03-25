@@ -5,7 +5,7 @@ import torchmetrics.classification
 import torchmetrics.classification.accuracy
 import torchmetrics.classification.precision_recall
 import torchmetrics.classification.specificity
-from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss, masked_min_max_loss, ccc_loss
+from utils.train_utils import masked_mse_loss, masked_mae_loss, gradient_loss, masked_min_max_loss, ccc_loss, auto_correlation_loss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn import functional as F
 from utils.plot_utils import plot_reconstruction, plot_generation
@@ -45,6 +45,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         self.grad_loss_lambda = config.grad_loss_lambda
         self.min_max_loss_lambda = config.min_max_loss_lambda
         self.ccc_loss_lambda = config.ccc_loss_lambda
+        self.auto_correlation_loss_lambda = config.auto_correlation_loss_lambda
         if not config.is_sweep:
             self.save_hyperparameters()
 
@@ -149,6 +150,9 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         if 'ccc' in self.loss_type:
             ccc = ccc_loss(shift_reconstruct, shift_x)
 
+        if 'ac' in self.loss_type:
+            ac = auto_correlation_loss(shift_reconstruct, shift_x, convolution=self.model.patch_embedding)
+
         if 'mae' in self.loss_type:
             mae = (shift_reconstruct, shift_x)
         else:
@@ -176,6 +180,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         self.log(f"{step}_grad", grad.item(), prog_bar=False, batch_size=self.batch_size)
         if 'min_max' in self.loss_type: self.log(f"{step}_min_max", min_max.item(), prog_bar=False, batch_size=self.batch_size)
         if 'ccc' in self.loss_type: self.log(f"{step}_ccc", ccc.item(), prog_bar=True, batch_size=self.batch_size)
+        if 'ac' in self.loss_type: self.log(f"{step}_ac", ac.item(), prog_bar=True, batch_size=self.batch_size)
 
         self.log(f"{step}_nrmse", nrmse.mean().item(), prog_bar=True, batch_size=self.batch_size)
         
@@ -186,6 +191,7 @@ class PretrainedxLSTMNetwork(L.LightningModule):
         if 'grad' in self.loss_type: loss += grad * self.grad_loss_lambda
         if 'min_max' in self.loss_type: loss += min_max * self.min_max_loss_lambda
         if 'ccc' in self.loss_type: loss += ccc * self.ccc_loss_lambda
+        if 'ac' in self.loss_type: loss += ac * self.auto_correlation_loss_lambda
 
         self.log(f"{step}_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
         return loss
